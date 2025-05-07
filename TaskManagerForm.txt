@@ -1,0 +1,1184 @@
+
+Option Explicit
+
+Public token As Outlook.mailItem
+Public oMail As Outlook.mailItem
+Public EDIT_MODE As Boolean
+
+Private notFirst_Iteration As Boolean
+
+Private athena_area_list() As Variant
+Private athena_country_list() As Variant
+Private athena_priority_list() As Variant
+Private athena_category_list() As Variant
+Private athena_matrix_list As Variant
+Private athena_user_list() As Variant
+Private athena_client_list() As Variant
+Private athena_origin_list() As Variant
+
+'inputs
+Public GLOBAL_MAILBOX As String
+Public GLOBAL_TITLE_ORIGINAL As String
+
+'Outputs SN
+Public GLOBAL_CONTROL As Integer
+Public GLOBAL_INC_OP As String
+Public GLOBAL_NUM_ACTIONS_ERR As String
+Public GLOBAL_NOTES As String
+Public GLOBAL_COMUNICA As String
+Public GLOBAL_CANAL As String
+
+'outputs
+Public ATHENA_GLOBAL_CONTROL As Integer
+Public GLOBAL_TITLE_FULL As String    'Title + comment
+Public GLOBAL_NUM_ACTIONS As String
+Public GLOBAL_AREA As String
+Public GLOBAL_AREA_COD As String
+Public GLOBAL_COUNTRY As String
+Public GLOBAL_COUNTRY_COD As String
+Public GLOBAL_CATEGORY As String
+Public GLOBAL_CATEGORY_COD As String
+Public GLOBAL_TIME_ADJUST As Boolean
+Public GLOBAL_TIME_START As String    'Si <> vacio, empieza finalizado.
+Public GLOBAL_TIME_END As String
+Public GLOBAL_POSTPONED As Boolean  'Si True empieza pausado. Si False, empieza en Curso
+Public GLOBAL_REASSIGNED As Boolean 'Si False, usuario "yo", si true, usuario=GLOBAL_USER
+Public GLOBAL_USER As String
+Public GLOBAL_USER_COD As String
+Public GLOBAL_USER_EMPLOYEE As String
+Public GLOBAL_ORIGIN_COD As String 'valores: manual, mail, programada, remedy...
+Public GLOBAL_ORIGIN As String
+Public GLOBAL_PRIORITY As String 'valores: manual, mail, programada, remedy...
+Public GLOBAL_PRIORITY_COD As String
+Public GLOBAL_CLIENT As String
+Public GLOBAL_CLIENT_COD As String
+Public GLOBAL_SEGMENT As String
+Public GLOBAL_MAIL_STAMP As String 'marca de recepción del correo sobre el que se clasifica
+Public GLOBAL_COMMENT As String
+Public GLOBAL_PK As String
+Public GLOBAL_TAG As String
+Public GLOBAL_MATRIX_UNITS As String
+Public GLOBAL_INDEX_LIST As Variant
+
+Private Const Window_Height = 500
+Private Const Window_Width = 800
+Private Const Window_Left = 10
+Private Const Window_Top = 10
+Private Const Window_border = 6
+
+Private Const TareaFrame_Height = 64
+Private Const TareaFrame_Left = 6
+Private Const TareaFrame_Top = 0
+Private Const TareaFrame_Width = 500
+
+Private Const SistemaFrame_Height = 36
+Private Const SistemaFrame_Left = 6
+Private Const SistemaFrame_Top = 64
+Private Const SistemaFrame_Width = 190
+
+Private Const PaisFrame_Height = 126
+Private Const PaisFrame_Left = 6
+Private Const PaisFrame_Top = 100
+Private Const PaisFrame_Width = 190
+
+        Private Const CategoriaFrame_Height = 162
+        Private Const CategoriaFrame_Left = 202
+        Private Const CategoriaFrame_Top = 64
+        Private Const CategoriaFrame_Width = 304
+
+Private Const ChecksFrame_Height = 74
+Private Const ChecksFrame_Left = 6
+Private Const ChecksFrame_Top = 226
+Private Const ChecksFrame_Width = 114
+
+        Private Const ReassignFrame_Height = 36
+        Private Const ReassignFrame_Left = 126
+        Private Const ReassignFrame_Top = 226
+        Private Const ReassignFrame_Width = 306
+
+        Private Const TiempoFrame_Height = 36
+        Private Const TiempoFrame_Left = 126
+        Private Const TiempoFrame_Top = 262
+        Private Const TiempoFrame_Width = 306
+
+Private Const NotesFrame_Height = 48
+Private Const NotesFrame_Left = 6
+Private Const NotesFrame_Top = 300
+Private Const NotesFrame_Width = 426
+
+Private Const TagFrame_Height = 80
+Private Const TagFrame_Left = 6
+Private Const TagFrame_Top = 348
+Private Const TagFrame_Width = 190
+
+Private Const ButtonFrame_Height = 40
+Private Const ButtonFrame_Left = 6
+Private Const ButtonFrame_Top = 348
+Private Const ButtonFrame_Width = 500
+
+
+'Listado de métodos. Método dummy de acceso directo a diferentes métodos con mayus+f2
+Public Sub listadoMetodos()
+    'EVENTOS DE FORMULARIO
+    UserForm_Activate
+    UserForm_Terminate
+    
+    SistemaComboBox_Change
+    PaisListBox_DblClick Nothing
+    PaisListBoxSel_DblClick Nothing
+    MultiUnitCheckBox_Click
+    CategoriaListBox_Click
+    AjusteTiempoCheckBox_Click
+    ReassignCheckBox_Click
+    
+    AceptarButton_Click
+    CancelarButton_Click
+    
+    'AUXILIARES
+    formateaFormulario
+
+    Load_Priority
+    Load_Origin
+    Load_Client
+    Load_Sistems
+    Load_Units
+    Load_Categories
+    Load_Owner
+    
+    quitaMarcaSinClasificar
+    get_cod_by_desc athena_area_list, ""
+    get_multiple_categories_by_desc athena_area_list, ""
+    recalculaAltoVentana
+    recolocaBotones 0
+    resetear_variables
+    cierraFormulario
+    
+    
+End Sub
+
+'Establece a vacío las variables GLOBAL
+Private Sub resetear_variables()
+    GLOBAL_MAILBOX = ""
+    GLOBAL_TITLE_ORIGINAL = ""
+    GLOBAL_MAIL_STAMP = ""
+    GLOBAL_TITLE_FULL = ""
+    GLOBAL_NUM_ACTIONS = ""
+    GLOBAL_AREA = ""
+    GLOBAL_COUNTRY = ""
+    GLOBAL_CATEGORY = ""
+    GLOBAL_TIME_ADJUST = False
+    GLOBAL_TIME_START = ""
+    GLOBAL_TIME_END = ""
+    GLOBAL_POSTPONED = False
+    GLOBAL_USER = ""
+    GLOBAL_USER_EMPLOYEE = ""
+    GLOBAL_ORIGIN_COD = Athena_Token_origin_Cliente_Cod
+    GLOBAL_ORIGIN = Athena_Token_origin_Cliente
+    GLOBAL_PRIORITY = Athena_Mail_Priority_Cliente
+    GLOBAL_PRIORITY_COD = Athena_Mail_PriorityCod_Normal
+    GLOBAL_CLIENT = ""
+    GLOBAL_CLIENT_COD = ""
+    GLOBAL_INC_OP = ""
+    GLOBAL_NUM_ACTIONS_ERR = ""
+    
+End Sub
+
+
+
+    
+    Private Sub CancelarButton_Click()
+    ATHENA_GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
+    LabelAsunto.Caption = ""
+    SistemaComboBox.ListIndex = -1
+    PaisListBox.ListIndex = -1
+    PaisListBoxSel.ListIndex = -1
+    PriorityComboBox.ListIndex = -1
+    CategoriaListBox.ListIndex = -1
+    ClienteComboBox.ListIndex = -1
+    OriginComboBox.ListIndex = -1
+    
+    resetear_variables
+    
+    If Not (token Is Nothing) Then
+        'If oMail Is Nothing And Not Athena_Token_get_Status(token) = Athena_Mail_Status_Discarted And EDIT_MODE = False Then 'Tarea nueva
+        If Not Athena_Token_get_Status(token) = Athena_Mail_Status_Discarted And EDIT_MODE = False Then 'Tarea nueva
+            token.Delete
+            Set token = Nothing
+            'TODO JAVI! Marcar oMail sinClasificar.
+        End If
+    End If
+    cierraFormulario
+    'Athena_cTaskManager.Athena_drop_token (Token)
+End Sub
+
+Public Sub AceptarButton_Click()
+    Dim FormError As String
+    Dim idTarea As Long
+    Dim formVars() As String
+
+    'formVars = StringArray(GLOBAL_TITLE_FULL, GLOBAL_NUM_ACTIONS, _
+    '                GLOBAL_AREA_COD, GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+    '                GLOBAL_TIME_ADJUST, GLOBAL_TIME_START, GLOBAL_TIME_END, _
+    '                GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
+    '                GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
+    '                GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, GLOBAL_COMMENT, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR
+    '                GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS, GLOBAL_CANAL)
+
+
+    ' Origin anterior
+'    If GLOBAL_TITLE_ORIGINAL = "Nueva Tarea" And Not EDIT_MODE Then
+'        GLOBAL_ORIGIN_COD = Athena_Token_origin_Manual_Cod
+'        GLOBAL_ORIGIN = Athena_Token_origin_Manual
+'    ElseIf GLOBAL_TITLE_ORIGINAL = "Nueva Tarea Programada" And Not EDIT_MODE Then
+'        GLOBAL_ORIGIN_COD = Athena_Token_origin_Planned_Cod
+'        GLOBAL_ORIGIN = Athena_Token_origin_Planned
+'    ElseIf Not EDIT_MODE Then
+'        GLOBAL_ORIGIN_COD = Athena_Token_origin_Email_Cod
+'        GLOBAL_ORIGIN = Athena_Token_origin_Email
+'    Else
+'        GLOBAL_ORIGIN_COD = Athena_Token_get_OriginCod(token)
+'        GLOBAL_ORIGIN = Athena_Token_get_Origin(token)
+'    End If
+    
+   ' Origin
+    If OriginComboBox = "Cliente" Then
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_Cliente_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_Cliente
+    ElseIf OriginComboBox = "Back-Office/País" Then
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_BO_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_BO
+    ElseIf OriginComboBox = "Front Office/Ventas" Then
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_FO_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_FO
+    ElseIf OriginComboBox = "Implementación global" Then
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_IG_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_IG
+    ElseIf OriginComboBox = "GTBDesk" Then
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_GTB_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_GTB
+    Else
+        GLOBAL_ORIGIN_COD = Athena_Token_origin_IT_Cod
+        GLOBAL_ORIGIN = Athena_Token_origin_IT
+    End If
+   
+    
+    ' Title
+    If oMail Is Nothing And Not EDIT_MODE Then 'Tarea Manual nueva
+        If ComentarioTextBox <> "" Then
+            GLOBAL_TITLE_FULL = ComentarioTextBox
+        Else
+            FormError = FormError & vbNewLine & " * Indique una Desc. "
+        End If
+    ElseIf Not EDIT_MODE Then 'Tarea nueva sobre correo
+        GLOBAL_TITLE_FULL = clearString(GLOBAL_TITLE_ORIGINAL)
+    Else ' Tarea editando
+        GLOBAL_TITLE_FULL = Athena_Token_get_Title(token)
+    End If
+    
+    Dim doChange As Boolean
+    ' Area
+    If SistemaComboBox.ListIndex = -1 Then ' Invalid pointer
+        FormError = FormError & vbNewLine & " * Indique un Sistema. "
+    ElseIf SistemaComboBox <> Athena_Token_get_AreaDept(token) Then ' New Area selected
+        GLOBAL_AREA = SistemaComboBox
+        GLOBAL_AREA_COD = get_cod_by_desc(athena_area_list, SistemaComboBox)
+        doChange = True
+    Else ' Existing one
+        GLOBAL_AREA = Athena_Token_get_AreaDept(token)
+        GLOBAL_AREA_COD = Athena_Token_get_AreaDeptCod(token)
+    End If
+    
+    ' Unit
+    If PaisListBoxSel.ListCount <= 0 Then
+        FormError = FormError & vbNewLine & " * Indique un Pais. "
+    Else
+        GLOBAL_MATRIX_UNITS = ""
+        If MultiUnitCheckBox Or PaisListBox = UNIT_CROSS Then
+            GLOBAL_COUNTRY = UNIT_CROSS
+            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, UNIT_CROSS)
+            
+            ' Matrix (Multi Unit Or Cross //Matriz reparto)
+            Dim i As Integer
+            For i = 0 To PaisListBoxSel.ListCount - 1
+                GLOBAL_MATRIX_UNITS = GLOBAL_MATRIX_UNITS & PaisListBoxSel.List(i) & SEP_TOKEN
+            Next
+            GLOBAL_MATRIX_UNITS = Left(GLOBAL_MATRIX_UNITS, Len(GLOBAL_MATRIX_UNITS) - 1)
+            If Athena_Token_get_Matrix_Units(token) <> GLOBAL_MATRIX_UNITS Then doChange = True
+        Else
+            GLOBAL_COUNTRY = PaisListBoxSel.List(0)
+            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBoxSel.List(0))
+        End If
+        If Athena_Token_get_Country(token) <> GLOBAL_COUNTRY Then doChange = True
+    End If
+    
+    ' Category
+    If CategoriaListBox.ListIndex = -1 Then ' Invalid pointer
+        FormError = FormError & vbNewLine & " * Seleccione una Categoria. "
+    ElseIf CategoriaListBox <> Athena_Token_get_Categoria(token) Or doChange Then ' New Category selected
+        GLOBAL_CATEGORY = CategoriaListBox
+        If MultiUnitCheckBox Then
+            GLOBAL_CATEGORY_COD = "-1"
+        Else
+            GLOBAL_CATEGORY_COD = get_cod_by_desc(athena_category_list, CategoriaListBox)
+        End If
+        doChange = True
+    Else
+        GLOBAL_CATEGORY = Athena_Token_get_Categoria(token) ' Existing one
+        GLOBAL_CATEGORY_COD = Athena_Token_get_AreaDeptCategoriaCod(token)
+    End If
+    
+    GLOBAL_POSTPONED = NoInitCheckBox
+    
+    ' Time Adjust
+    GLOBAL_TIME_ADJUST = AjusteTiempoCheckBox
+    If Not EDIT_MODE And GLOBAL_TIME_ADJUST Then
+        Dim temp_t As String: temp_t = FechaInicioTextBox
+        If Not oMail Is Nothing Then temp_t = Format(oMail.CreationTime, Athena_FullTime_Pattern)
+        If esFechaValida(FechaInicioTextBox) And (oMail Is Nothing Or (Not oMail Is Nothing And FechaInicioTextBox >= temp_t)) Then
+            GLOBAL_TIME_START = FechaInicioTextBox
+        Else
+            FormError = FormError & vbNewLine & " * Fecha INICIO errónea. Formato yyyy-mm-dd hh:mm:ss y No puede ser anterior al correo recibido. "
+        End If
+        If esFechaValida(FechaFinTextBox) And (FechaInicioTextBox < FechaFinTextBox) Then
+            GLOBAL_TIME_END = FechaFinTextBox
+        Else
+            FormError = FormError & vbNewLine & " * Fecha FIN erronea. Formato yyyy-mm-dd hh:mm:ss y Tiene que ser mayor que fecha INICIO. "
+        End If
+    End If
+    
+    ' Owner
+    GLOBAL_REASSIGNED = ReassignCheckBox
+    If Not EDIT_MODE And GLOBAL_REASSIGNED Then ' Creating New Task / Reassigned
+        If RealizadorComboBox.ListIndex = -1 Then ' Only Category / Unassigned
+            GLOBAL_USER = Athena_Mail_Owner_UnAssigned
+            GLOBAL_USER_EMPLOYEE = ""
+            GLOBAL_USER_COD = Athena_Mail_OwnerCod_UnAssigned
+        Else    ' Both
+            GLOBAL_USER = RealizadorComboBox
+            GLOBAL_USER_COD = get_cod_by_desc(athena_user_list, RealizadorComboBox)
+            GLOBAL_USER_EMPLOYEE = getUserEmployee("" & GLOBAL_USER_COD)
+        End If
+    ElseIf Not EDIT_MODE Then ' Creating New Task / myself
+        GLOBAL_USER = getUserName(getUserLogin)
+        GLOBAL_USER_COD = getUserCod(getUserLogin)
+        GLOBAL_USER_EMPLOYEE = getUserLogin
+    Else    ' Editing Existing one
+        GLOBAL_USER = Athena_Token_get_Owner(token)
+        GLOBAL_USER_COD = Athena_Token_get_OwnerCod(token)
+        GLOBAL_USER_EMPLOYEE = getUserEmployee("" & Athena_Token_get_OwnerCod(token))
+    End If
+    
+    ' Num Actions
+    GLOBAL_NUM_ACTIONS = AccionesTextBox
+    If esNumeroAccionesValido(AccionesTextBox) Then
+        GLOBAL_NUM_ACTIONS = AccionesTextBox
+    Else
+        'GLOBAL_NUM_ACTIONS = 1
+        FormError = FormError & vbNewLine & " * N. Actuaciones. Valor introducido no valido. "
+    End If
+    
+    ' Priority
+    If PriorityComboBox.ListIndex = -1 Then ' Invalid pointer
+        FormError = FormError & " * Indique Prioridad. "
+    ElseIf PriorityComboBox <> Athena_Token_get_Prioridad(token) Then ' New Priority selected
+        GLOBAL_PRIORITY = PriorityComboBox
+        GLOBAL_PRIORITY_COD = get_cod_by_desc(athena_priority_list, PriorityComboBox)
+    Else ' Existing one
+        GLOBAL_PRIORITY = Athena_Token_get_Prioridad(token)
+        GLOBAL_PRIORITY_COD = Athena_Token_get_PrioridadCod(token)
+    End If
+
+    
+ 'Nuevo codigo cliente
+    'Si no es proyecto da error porque el cliente es obligatorio
+    If ClienteComboBox.ListIndex = -1 And SistemaComboBox <> "Proyectos" Then ' Invalid pointer
+        FormError = FormError & " * Indique Cliente. "
+        
+    Else ' New client selected
+        GLOBAL_CLIENT = ClienteComboBox.text
+        GLOBAL_CLIENT_COD = get_cod_by_desc(athena_client_list, ClienteComboBox)
+    End If
+
+    Athena_Token_get_Client token, GLOBAL_CLIENT
+    
+    
+' Guardar canal
+    If CanalComboBox.ListIndex = -1 Then
+        FormError = FormError & vbNewLine & "Seleccione un Canal"
+    Else
+        GLOBAL_CANAL = CanalComboBox.value
+    End If
+    
+    ' SN and Notes/Comments
+    
+    GLOBAL_NOTES = NotesTextBox.text
+    
+    If SNBox.text <> "" Then
+        GLOBAL_INC_OP = SNBox.text
+        GLOBAL_NUM_ACTIONS_ERR = ""
+        GLOBAL_COMUNICA = ""
+    Else
+        GLOBAL_INC_OP = ""
+        GLOBAL_NUM_ACTIONS_ERR = ""
+        GLOBAL_COMUNICA = ""
+    End If
+    
+   Athena_Token_set_Incident token, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR, GLOBAL_NOTES, GLOBAL_COMUNICA
+
+    ' moved to UserForm_Activate
+    ' PK / NLTK / PLN
+    'If Not oMail Is Nothing Then GLOBAL_PK = doRemoveHTML(oMail.HTMLBody)
+
+    'LOGICA DE DRAFT/TOKEN
+    If FormError <> "" Then
+        MsgBox FormError, vbCritical, "Rellene con atención el formulario"
+    Else
+        formVars = StringArray(GLOBAL_TITLE_FULL, GLOBAL_NUM_ACTIONS, _
+                GLOBAL_AREA_COD, GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+                GLOBAL_TIME_ADJUST, GLOBAL_TIME_START, GLOBAL_TIME_END, _
+                GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
+                GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
+                GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, GLOBAL_COMMENT, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR, _
+                GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS)
+                
+                
+        'MODO EDICION
+        If EDIT_MODE Then
+            Athena_edit_token token, formVars 'Solo tienen valor los campos modificados
+            MsgBox "Tarea modificada"
+            cierraFormulario
+        'MODO CREACION/CLASIFICACION
+        Else
+            Dim status As String: status = estadoInicio(formVars)
+            If Me.token Is Nothing Then ' Create Token and Set it up
+                Set Me.token = Athena_Token_Init(Me.oMail, formVars, status, getIdDuty)
+            Else ' Already created >> Only Set it up
+                Athena_Token_Update_Mail oMail, Me.token, formVars, status, getIdDuty
+            End If
+            
+            cierraFormulario
+        End If
+        
+        ' Set / Update Index's
+        Athena_Token_set_Indexs token, GLOBAL_INDEX_LIST
+        
+        ' New Method 3.0 >> Everything stored at local db
+        If Not Athena_Token_push(token) Then MsgBox "No se ha actualizado la info en BBDD, será necesario sincronizar posteriormente la información de la tarea"
+    End If
+End Sub
+
+Private Sub ProjectButton_Click()
+
+ProjectForm.Show
+
+
+End Sub
+
+Private Sub Frame2_Click()
+
+End Sub
+
+Private Sub IndexButton_Click()
+On Error GoTo ErrHndlr
+    Dim miTaskIndex As New IndexForm
+    If Not Me.token Is Nothing Then
+        Set miTaskIndex.token = Me.token
+    Else
+        Dim j As Long
+        Dim indexJson As Variant: indexJson = Me.GLOBAL_INDEX_LIST 'Split(Me.GLOBAL_INDEX_LIST, SEP_TOKEN)
+        miTaskIndex.IndexBox.Clear
+        For j = 0 To VariantSize(Me.GLOBAL_INDEX_LIST)
+             On Error Resume Next
+            miTaskIndex.IndexBox.AddItem indexJson(j)(0)
+            miTaskIndex.IndexBox.List(miTaskIndex.IndexBox.ListCount - 1, 1) = indexJson(j)(1)
+        Next
+    End If
+    miTaskIndex.GLOBAL_INDEX_LIST = Me.GLOBAL_INDEX_LIST
+    miTaskIndex.Show
+    If miTaskIndex.GLOBAL_CONTROL = ATHENA_CONTROL_OK Then
+        'MsgBox "Cumplimentado Indices: " + CStr(miTaskIndex.IndexBox.ListCount)
+        'MsgBox AccionesTextBox.value
+        Me.GLOBAL_INDEX_LIST = miTaskIndex.Get_Index_List
+        If miTaskIndex.IndexBox.ListCount <> AccionesTextBox.value Then
+            Select Case MsgBox("Nº Act (" & AccionesTextBox.value & ") es distinto al número de Index insertados (" & miTaskIndex.IndexBox.ListCount & "). Desea actualizarlo?", vbYesNoCancel, "Actualizar acciones")
+            Case vbYes
+                AccionesTextBox = miTaskIndex.IndexBox.ListCount
+            Case vbNo
+            Case Else
+            End Select
+        End If
+
+    End If
+ErrHndlr:
+
+End Sub
+
+Private Sub OriginComboBox_Change()
+
+End Sub
+
+Private Sub TareaFrame_Click()
+
+End Sub
+
+Private Sub UserForm_Terminate()
+    Call cierraFormulario
+End Sub
+
+Private Sub cierraFormulario()
+    Me.Hide
+    'Semáforo. Evitamos que se toque un mail clasificandose.
+    If Not (Me.token Is Nothing) Then
+        If Athena_Token_get_Status(Me.token) = Athena_Mail_Status_Classifying Then Athena_Token_set_Status Me.token, Athena_Mail_Status_NoClassify
+        Me.token.Save
+        ' Clear Source Email
+        If Not (Me.oMail Is Nothing) Then quitaMarcaSinClasificar
+    End If
+    Application.ActiveExplorer.CurrentView.Apply
+    'Unload Me
+End Sub
+
+Private Sub quitaMarcaSinClasificar()
+    ' Quita la categoría de #Sin Clasificar del mail original
+    If Not Me.oMail Is Nothing Then
+        Me.oMail.categories = Replace(Replace(Me.oMail.categories, Athena_Mail_Status_NoClassify, Replace(Athena_Mail_Status_Discarted_Related, "#", "")), ";;", ";")
+        Me.oMail.UserProperties.Add(Athena_Column_Solver, olText).value = getUserName(getUserLogin())
+        Me.oMail.UnRead = False
+        Me.oMail.Save
+    End If
+End Sub
+
+Private Sub ponMarcaSinClasificar()
+    ' Quita la categoría de #Sin Clasificar del mail original
+    If Not Me.oMail Is Nothing Then
+        Me.oMail.categories = Me.oMail.categories & ";Athena_Mail_Status_NoClassify"
+        Me.oMail.UnRead = True
+        Me.oMail.Save
+    End If
+End Sub
+
+Private Sub UserForm_Activate()
+    formateaFormulario
+    
+    notFirst_Iteration = True
+    
+    LabelAsunto.Caption = GLOBAL_TITLE_ORIGINAL
+    If oMail Is Nothing And Not EDIT_MODE Then
+        ComentarioTextBox.Visible = True
+    Else
+        ComentarioTextBox.Visible = False
+    End If
+    
+    'Set CommandButton1.Picture = Outlook.Office
+    
+    ' PK / NLTK / PLN
+    If Not oMail Is Nothing Then
+        If Not (EDIT_MODE) Then
+            GLOBAL_PK = doRemoveHTML(oMail.HTMLBody)
+        Else
+            GLOBAL_PK = Athena_Token_get_PK(oMail)
+        End If
+    End If
+    
+    ' Priority
+    Load_Priority
+    
+    ' Origin
+    Load_Origin
+    
+    'Client
+    Load_Client
+    
+    ' Area - Dept
+    Load_Sistems
+    
+    ' ' ' ' ComboBox Canal
+
+    With CanalComboBox
+        .Clear
+        .AddItem "Mail"
+        .AddItem "Call"
+        If GLOBAL_CANAL <> "" Then
+            .value = GLOBAL_CANAL
+        
+        Else
+            .ListIndex = 0
+        End If
+    
+    End With
+
+    
+    If (EDIT_MODE) Then
+        GLOBAL_COUNTRY = Athena_Token_get_Country(Me.token)
+        GLOBAL_COUNTRY_COD = Athena_Token_get_CountryCod(Me.token)
+        
+        ' Read Token Unit
+        If Athena_Token_get_Matrix_Units(Me.token) <> "" Then
+            MultiUnitCheckBox.value = Athena_Token_get_AreaDeptCategoriaCod(Me.token) = "-1"
+            If notFirst_Iteration Then
+                ' READ FROM TOKEN
+                Dim item As Variant
+                Dim i As Integer
+                item = VBA.Split(Athena_Token_get_Matrix_Units(Me.token), SEP_TOKEN)
+                For i = 0 To VariantSize(item) - 1
+                    PaisListBoxSel.AddItem item(i)
+                Next
+            End If
+        End If
+        
+        ' Initial Load of Already selected units
+        'CategoriaListBox_Click
+        ' If not Unit = CROSS Then just One element
+        If PaisListBox <> UNIT_CROSS And Not MultiUnitCheckBox And PaisListBoxSel.ListCount = 0 Then PaisListBoxSel.AddItem PaisListBox
+        Load_Categories
+    
+        ComentarioTextBox = Athena_Token_get_Comments(token)
+        
+        AccionesTextBox = Athena_Token_get_Num_Actions(token)
+        
+        CategoriaFrame.Visible = True
+        ClassFrame.Visible = True
+        
+        ChecksFrame.Visible = False
+        NotesFrame.Visible = True
+        
+        recalculaAltoVentana
+    Else
+        If AccionesTextBox.text = "" Then AccionesTextBox = "1"
+    End If
+    
+    ' Index
+    Me.GLOBAL_INDEX_LIST = Athena_Token_get_Events_JSON(Me.token, TOKEN_INDEX)
+    
+    notFirst_Iteration = False
+    
+    'SN
+    
+     If SNBox.text <> "" Then Athena_Token_get_incident (Me.token)
+     
+
+    
+End Sub
+
+Private Sub AjusteTiempoCheckBox_Click()
+    If AjusteTiempoCheckBox.value Then
+        AjusteTiempoFrame.Visible = True
+        FechaInicioTextBox = Format(Now, Athena_FullTime_Pattern) 'Date & " " & Time
+        FechaFinTextBox = FechaInicioTextBox.text ' Format(DateAdd("s", 1, FechaInicioTextBox.TEXT), Athena_FullTime_Pattern) 'Date & " " & Time
+        
+        If SistemaComboBox = "Proyectos" Then
+        FechaInicioTextBox.Visible = True
+        FechaInicioLabel.Visible = True
+        Else
+        'Invisibilizar la hora de inicio para que no se pueda modificar
+        FechaInicioTextBox.Visible = False
+        FechaInicioLabel.Visible = False
+        End If
+    Else
+        AjusteTiempoFrame.Visible = False
+        FechaInicioTextBox = ""
+        FechaFinTextBox = ""
+    End If
+    
+    recalculaAltoVentana
+End Sub
+
+
+Private Sub ReassignCheckBox_Click()
+    ReassignFrame.Visible = ReassignCheckBox.value
+    If ReassignCheckBox Then Load_Owner
+End Sub
+
+Private Function get_cod_by_desc(arrayList() As Variant, texto As String) As String
+    Dim cod As Integer: cod = -1
+    Dim item As Variant
+    If Not IsEmpty(arrayList(0)) Then
+        For Each item In arrayList
+            If (item(0) = texto) Then cod = item(1)
+        Next
+    End If
+
+    get_cod_by_desc = cod
+End Function
+
+Private Function get_multiple_categories_by_desc(arrayList() As Variant, texto As String) As Variant
+    Dim categories As Variant
+    Dim item As Variant
+    If Not IsEmpty(arrayList(0)) Then
+        For Each item In arrayList
+            Dim rowSep As String: rowSep = "^"
+            If (item(0) = texto) Then
+                Dim n As Integer: n = VariantSize(item) - 1
+                Dim churro As String: churro = VBA.Join(item, rowSep)
+                churro = Replace(churro, rowSep, SEP_TOKEN & Replace(Round(1 / n, 4), ",", ".") & rowSep) & SEP_TOKEN & Replace(Round(1 / n, 4), ",", ".")
+                categories = VBA.Split(VBA.Mid$(churro, InStr(1, churro, rowSep) + Len(rowSep), Len(churro)), rowSep)
+            End If
+        Next
+    End If
+    get_multiple_categories_by_desc = categories
+End Function
+
+Private Sub Load_Owner()
+    RealizadorComboBox.Clear
+        
+    Dim query As String: query = ATHENA_GET_QUERY_GET_USER(SistemaComboBox.value)
+    athena_user_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    
+    Dim item As Variant
+    If IsEmpty(athena_user_list(0)) Then
+       RealizadorComboBox.AddItem info_not_found_err
+    Else
+       For Each item In athena_user_list
+           RealizadorComboBox.AddItem item(0)
+       Next item
+    End If
+End Sub
+
+Private Sub Load_Priority()
+    ' Priority
+    PriorityComboBox.Clear
+    athena_priority_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_PRIORITY, verbose)
+    
+    Dim item As Variant
+    If IsEmpty(athena_priority_list(0)) Then
+        PriorityComboBox.AddItem "-1"
+    Else
+        Dim PrioirtyToken As String: PrioirtyToken = Athena_Token_get_Prioridad(token)
+        If PrioirtyToken = "" Then PrioirtyToken = Athena_Mail_Priority_Cliente
+        For Each item In athena_priority_list
+            PriorityComboBox.AddItem item(0)
+        Next item
+        PriorityComboBox = PrioirtyToken
+    End If
+End Sub
+
+Private Sub Load_Origin()
+    ' Origin
+    OriginComboBox.Clear
+    athena_origin_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_ORIGIN, verbose)
+    
+    Dim item As Variant
+    If IsEmpty(athena_origin_list(0)) Then
+        OriginComboBox.AddItem "-1"
+    Else
+        Dim OriginToken As String: OriginToken = Athena_Token_get_Origin(token)
+        If OriginToken = "" Then OriginToken = Athena_Token_origin_Cliente
+        For Each item In athena_origin_list
+            OriginComboBox.AddItem item(0)
+        Next item
+        OriginComboBox = OriginToken
+    End If
+End Sub
+
+
+Public Sub Load_Client()
+    ' Client
+
+    ClienteComboBox.Clear
+    athena_client_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_CLIENT, verbose)
+
+    Dim item As Variant
+    If IsEmpty(athena_client_list(0)) Then
+       ClienteComboBox.AddItem "-1"
+    Else
+        Dim client As String
+        For Each item In athena_client_list
+           ClienteComboBox.AddItem item(0)
+        Next item
+        ClienteComboBox = GLOBAL_CLIENT
+    End If
+
+
+
+
+End Sub
+
+Private Sub SistemaComboBox_Change()
+    If ATHENA_GLOBAL_CONTROL <> ATHENA_CONTROL_CANCEL Then
+        PaisFrame.Visible = True
+        Load_Units
+        recalculaAltoVentana
+    End If
+End Sub
+
+Private Sub Check_Category()
+    ' Area
+    If SistemaComboBox.ListIndex > -1 And PaisListBox.ListIndex > -1 And Not oMail Is Nothing Then ' Invalid pointer
+        MsgBox doEstimateCategory(SistemaComboBox.value, oMail.HTMLBody)
+    End If
+End Sub
+
+Private Sub CommandButton1_Click()
+    Check_Category
+End Sub
+
+Private Sub Load_Sistems()
+    SistemaComboBox.Clear
+    PaisListBox.Clear
+    PaisListBoxSel.Clear
+    CategoriaListBox.Clear
+    
+    athena_area_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_AREA_DEPT(GLOBAL_MAILBOX), verbose)
+    
+    Dim item As Variant
+    If IsEmpty(athena_area_list(0)) Then
+        SistemaComboBox.AddItem info_not_found_err
+    Else
+        Dim AreaEnLista As Boolean: AreaEnLista = False
+        For Each item In athena_area_list
+            SistemaComboBox.AddItem item(0)
+            If Not token Is Nothing Then If item(0) = Athena_Token_get_AreaDept(token) Then AreaEnLista = True
+        Next item
+        If (EDIT_MODE And AreaEnLista) Then SistemaComboBox = Athena_Token_get_AreaDept(token)
+    End If
+    
+    'Si solo hay un sistema
+    If SistemaComboBox.ListCount = 1 Then
+        SistemaComboBox.ListIndex = 0
+        
+        ' Ya se invoca a SistemaComboBox_Change
+        'Load_Units
+     End If
+End Sub
+
+Private Sub Load_Units()
+    PaisListBox.Clear
+    PaisListBoxSel.Clear
+    CategoriaListBox.Clear
+    
+    'Recuperar paises
+    Dim query As String: query = ATHENA_GET_QUERY_GET_COUNTRY(SistemaComboBox.value)
+    athena_country_list() = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    
+    Dim item As Variant
+    If IsEmpty(athena_country_list(0)) Then
+        PaisListBox.AddItem info_not_found_err
+    Else
+        Dim tokenCountry As String: tokenCountry = Athena_Token_get_Country(token)
+        Dim unitsMulti As String: unitsMulti = Athena_Token_get_Matrix_Units(token)
+        Dim pos As Integer: pos = 0
+        For Each item In athena_country_list
+            ' Discard CROSS (allways)
+            If Not (MultiUnitCheckBox And item(0) = UNIT_CROSS) Then
+                ' Discard Already Assigned (EDIT + FIRST)
+                If Not notFirst_Iteration Or Len(Replace(unitsMulti, item(0), "")) = Len(unitsMulti) Then
+                PaisListBox.AddItem item(0)
+                If item(0) = tokenCountry Then PaisListBox.ListIndex = pos
+                pos = pos + 1
+                End If
+            End If
+            
+        Next item
+        
+        'Si solo hay un pais (y no estamos en edicion), recuperamos las categorias
+        If PaisListBox.ListCount = 1 And Not EDIT_MODE Then
+            PaisListBox.ListIndex = 0
+            GLOBAL_COUNTRY = PaisListBox.List(PaisListBox.ListIndex)
+            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBox.List(PaisListBox.ListIndex))
+            '' Comentado ya que genera doble unidad
+            ''PaisListBoxSel.AddItem PaisListBox.List(PaisListBox.ListIndex)
+            ''Load_Categories
+        End If
+    End If
+    
+    'Hay más paises. Ocultamos Categoria hasta que se escogja pais
+    If PaisListBoxSel.ListCount <= 0 Then
+        CategoriaFrame.Visible = EDIT_MODE
+        ClassFrame.Visible = EDIT_MODE
+        
+        ChecksFrame.Visible = False
+        NotesFrame.Visible = True
+        
+        ReassignCheckBox.value = False
+        AjusteTiempoCheckBox.value = False
+        
+        NoInitCheckBox.value = False
+    End If
+    
+    recalculaAltoVentana
+End Sub
+
+Private Sub Load_Categories()
+    
+    Dim query As String
+    If Not MultiUnitCheckBox And PaisListBox.ListIndex > -1 Then query = ATHENA_GET_QUERY_GET_CATEGORY(SistemaComboBox, PaisListBox.List(PaisListBox.ListIndex))
+    If MultiUnitCheckBox And PaisListBoxSel.ListCount > 0 Then
+        
+        Dim units As String: units = PaisListBoxSel.List(0)
+        Dim i As Integer
+        For i = 1 To PaisListBoxSel.ListCount - 1
+            units = units & "," & PaisListBoxSel.List(i)
+        Next
+        query = ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS(get_cod_by_desc(athena_area_list, SistemaComboBox), VBA.Split(units, ","))
+    End If
+    If query <> "" Then
+        CategoriaListBox.Clear
+        athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+        
+        Dim item As Variant
+        If IsEmpty(athena_category_list(0)) Then
+           CategoriaListBox.AddItem info_not_found_err
+        Else
+           Dim EnLista As Boolean: EnLista = False
+           For Each item In athena_category_list
+               CategoriaListBox.AddItem item(0)
+               If Not token Is Nothing Then If item(0) = Athena_Token_get_Categoria(token) Then EnLista = True
+           Next item
+           If (EDIT_MODE And EnLista) Then CategoriaListBox = Athena_Token_get_Categoria(token)
+        End If
+    End If
+    
+End Sub
+
+Private Sub PaisListBoxSel_Click()
+    Call PaisSel_Seleccionado
+End Sub
+
+Private Sub PaisListBoxSel_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+    Call PaisSel_Seleccionado
+End Sub
+
+Private Sub PaisSel_Seleccionado()
+    If PaisListBoxSel.ListIndex > -1 And MultiUnitCheckBox Then
+        Dim posSel As Integer: posSel = PaisListBoxSel.ListIndex
+        PaisListBox.AddItem (PaisListBoxSel)
+        PaisListBoxSel.ListIndex = -1
+        PaisListBoxSel.RemoveItem posSel
+        
+        If PaisListBoxSel.ListCount > 0 Then
+            Load_Categories
+        Else
+            CategoriaListBox.Clear
+        End If
+    End If
+End Sub
+
+Private Sub PaisListBox_Click()
+    Call Pais_Selecconado
+End Sub
+
+Private Sub PaisListBox_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+    Call Pais_Selecconado
+End Sub
+
+Private Sub Pais_Selecconado()
+    'MsgBox "Pulsado"
+    If PaisListBox.ListIndex > -1 Then
+        Dim posSel As Integer: posSel = PaisListBox.ListIndex
+        If Not MultiUnitCheckBox Then
+            PaisListBoxSel.Clear  ' Clear each time clicked and NOT Multiple selections // Clears prev. one
+            GLOBAL_COUNTRY = PaisListBox.List(PaisListBox.ListIndex)
+            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBox.List(PaisListBox.ListIndex))
+            If GLOBAL_COUNTRY <> UNIT_CROSS Then PaisListBoxSel.AddItem (GLOBAL_COUNTRY)
+        Else
+            PaisListBoxSel.AddItem (PaisListBox.List(posSel))
+            GLOBAL_COUNTRY = UNIT_CROSS
+            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, UNIT_CROSS)
+            PaisListBox.ListIndex = -1
+            PaisListBox.RemoveItem posSel  ' If YES Multiple selection // Remove from original list
+        End If
+        
+        CategoriaFrame.Visible = True
+        ClassFrame.Visible = True
+        NotesFrame.Visible = True
+        
+        If Not EDIT_MODE Then ChecksFrame.Visible = True
+        
+        recalculaAltoVentana
+        
+        Load_Categories
+    End If
+End Sub
+
+' When Category is selected
+Private Sub CategoriaListBox_Click()
+    Dim i As Integer
+    Dim item As Variant
+    If CategoriaListBox.ListIndex > -1 Then
+        GLOBAL_CATEGORY = CategoriaListBox
+        GLOBAL_CATEGORY_COD = get_cod_by_desc(athena_category_list, CategoriaListBox)
+    End If
+    ' CROSS / Multi Unit
+    If GLOBAL_COUNTRY = UNIT_CROSS Then
+        ' Multi Unit
+        If MultiUnitCheckBox And PaisListBoxSel.ListCount > 0 Then
+            athena_matrix_list = get_multiple_categories_by_desc(athena_category_list, CategoriaListBox)
+        ' CROSS >> Fill In Unit selected List Box from "Matriz Reparto"
+        ElseIf Not MultiUnitCheckBox Then
+            PaisListBoxSel.Clear
+            athena_matrix_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(GLOBAL_CATEGORY_COD), verbose)
+            
+            If IsEmpty(athena_matrix_list(0)) Or athena_matrix_list(0)(0) = "" Then
+                MsgBox "No se ha definido Matriz de reparto para:" & vbNewLine & vbTab & vbNewLine & Replace(GLOBAL_CATEGORY, "#", vbNewLine & vbTab & "#") & "'"
+            Else
+                For i = 0 To VariantSize(athena_matrix_list) - 1
+                    PaisListBoxSel.AddItem athena_matrix_list(i)(0)
+                    item = athena_matrix_list(i)(1) & SEP_TOKEN & athena_matrix_list(i)(2)
+                    athena_matrix_list(i) = item
+                Next
+            End If
+        End If
+    End If
+End Sub
+
+Private Sub MultiUnitCheckBox_Click()
+    Load_Units
+End Sub
+
+
+Private Sub formateaFormulario()
+    
+    'colocamos la ventana en la esquina superior izquierda
+    StartUpPosition = 0
+    Height = Window_Height
+    Left = Window_Left
+    Top = Window_Top
+    Width = Window_Width
+
+    ''''' WINDOW ''''''
+    '------------------------'
+    '----**** Tarea *****----'
+    '--------**Prior***Acc***'
+    '------------------------'
+    '** Sist **'**** Cat ****'
+    '** Unit **'-------------'
+    '------------------------'
+    '** Check **'*** Own ****'
+    '-----------'*** Time ***'
+    '------------------------'
+    '----***** Note *****----'
+    '------------------------'
+    '** Tag **'
+    '------------------------'
+    '----**** Button ****----'
+    
+    Dim debugBorderStyle As Single
+    'borde de los frames
+    If verbose Then
+        debugBorderStyle = fmBorderStyleSingle
+    Else
+        debugBorderStyle = fmBorderStyleNone
+    End If
+    
+    TareaFrame.Visible = True
+    TareaFrame.BorderStyle = debugBorderStyle
+    
+    PriorityFrame.Visible = True
+    PriorityFrame.BorderStyle = debugBorderStyle
+    
+    AccionesFrame.Visible = True
+    AccionesFrame.BorderStyle = debugBorderStyle
+    
+    AceptarButton.Visible = True
+    CancelarButton.Visible = True
+    
+    SistemaFrame.Visible = True
+    SistemaFrame.BorderStyle = debugBorderStyle
+'    SistemaFrame.Top = SistemaFrame_Top
+'    SistemaFrame.Height = SistemaFrame_Height
+'    SistemaFrame.Left = SistemaFrame_Left
+'    SistemaFrame.Width = SistemaFrame_Width
+'
+    PaisFrame.Visible = False
+    PaisFrame.BorderStyle = debugBorderStyle
+'    PaisFrame.Top = PaisFrame_Top
+'    PaisFrame.Height = PaisFrame_Height
+'    PaisFrame.Left = PaisFrame_Left
+'    PaisFrame.Width = PaisFrame_Width
+'
+    CategoriaFrame.Visible = False
+    CategoriaFrame.BorderStyle = debugBorderStyle
+'    CategoriaFrame.Top = CategoriaFrame_Top
+'    CategoriaFrame.Height = CategoriaFrame_Height
+'    CategoriaFrame.Left = CategoriaFrame_Left
+'    CategoriaFrame.Width = CategoriaFrame_Width
+'
+
+    ClassFrame.Visible = False
+    ClassFrame.BorderStyle = debugBorderStyle
+    
+    ChecksFrame.Visible = False
+    ChecksFrame.BorderStyle = debugBorderStyle
+'    ChecksFrame.Top = ChecksFrame_Top
+'    ChecksFrame.Height = ChecksFrame_Height
+'    ChecksFrame.Left = ChecksFrame_Left
+'    ChecksFrame.Width = ChecksFrame_Width
+'
+    ReassignCheckBox.value = False
+    NoInitCheckBox.value = False
+    AjusteTiempoCheckBox.value = False
+
+    ReassignFrame.Visible = False
+    ReassignFrame.BorderStyle = debugBorderStyle
+'    ReassignFrame.Top = ReassignFrame_Top
+'    ReassignFrame.Height = ReassignFrame_Height
+'    ReassignFrame.Left = ReassignFrame_Left
+'    ReassignFrame.Width = ReassignFrame_Width
+'
+    AjusteTiempoFrame.Visible = False
+    AjusteTiempoFrame.BorderStyle = debugBorderStyle
+'    AjusteTiempoFrame.Top = TiempoFrame_Top
+'    AjusteTiempoFrame.Height = TiempoFrame_Height
+'    AjusteTiempoFrame.Left = TiempoFrame_Left
+'    AjusteTiempoFrame.Width = TiempoFrame_Width
+'
+    NotesFrame.Visible = False
+    NotesFrame.BorderStyle = debugBorderStyle
+'    NotesFrame.Top = NotesFrame_Top
+'    NotesFrame.Height = NotesFrame_Height
+'    NotesFrame.Left = NotesFrame_Left
+'    NotesFrame.Width = NotesFrame_Width
+'
+    TagFrame.Visible = False
+    TagFrame.BorderStyle = debugBorderStyle
+'    TagFrame.Top = NotesFrame_Top
+'    TagFrame.Height = NotesFrame_Height
+'    TagFrame.Left = NotesFrame_Left
+'    TagFrame.Width = NotesFrame_Width
+'
+    ButtonFrame.Visible = True
+    ButtonFrame.BorderStyle = debugBorderStyle
+'    ButtonFrame.Top = NotesFrame_Top
+'    ButtonFrame.Height = NotesFrame_Height
+'    ButtonFrame.Left = NotesFrame_Left
+'    ButtonFrame.Width = NotesFrame_Width
+    
+    recalculaAltoVentana
+End Sub
+
+Private Sub recalculaAltoVentana()
+    Dim altura As Integer: altura = Window_Height
+    
+    altura = TareaFrame.Height + SistemaFrame.Height + ButtonFrame.Height
+    If PaisFrame.Visible Then altura = TareaFrame.Height + SistemaFrame.Height + PaisFrame.Height + ButtonFrame.Height
+    If CategoriaFrame.Visible Then altura = TareaFrame.Height + CategoriaFrame.Height + ButtonFrame.Height
+    If ChecksFrame.Visible Then ' Check And Notes Visible at the same time
+        altura = altura + ChecksFrame.Height
+        If ReassignFrame.Visible Then
+            AjusteTiempoFrame.Top = TiempoFrame_Top
+        Else
+            AjusteTiempoFrame.Top = ReassignFrame_Top
+        End If
+        
+    End If
+    If NotesFrame.Visible Then
+        NotesFrame.Top = altura - ButtonFrame.Height
+        altura = altura + NotesFrame.Height
+    End If
+    
+    recolocaBotones altura - ButtonFrame.Height
+    Me.Height = altura + 30 ' Banner
+End Sub
+
+Private Sub recolocaBotones(size As Integer)
+    ButtonFrame.Top = size
+End Sub
+
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If CloseMode = vbFormControlMenu Then
+
+        CancelarButton_Click
+    End If
+End Sub
+
+

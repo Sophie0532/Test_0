@@ -1,0 +1,1121 @@
+Option Explicit
+
+Private Sub botonMergeConversation()
+On Error GoTo ErrHndlr
+    Dim token As Outlook.mailItem
+    Dim DirBuzon As String
+    Dim idDuty As String
+    Dim oMail As Outlook.mailItem
+    Dim i As Long
+    Dim entryIDs As Variant
+    Dim inboxFolder As Outlook.Folder
+    Dim SelectedObject As Outlook.mailItem
+    If initUserPath = -1 Then Exit Sub
+    DirBuzon = getMailBox()
+    Set inboxFolder = Get_Inbox_Folder(Application.ActiveExplorer.currentFolder)
+    
+    ' Check current selection
+    If Application.ActiveExplorer.Selection.Count = 1 Then
+        Set SelectedObject = Application.ActiveExplorer.Selection.item(1)
+        If TypeName(SelectedObject) = "MailItem" Then  ' Email
+            ' Ask for task id
+            idDuty = InputBox("Indique el nº de tarea al que quiere asociar el mail:" & vbNewLine & vbNewLine & SelectedObject.Subject & vbNewLine, "Merge Conversation")
+            If IsNumeric(idDuty) Then
+                ' TODO >> Busqueda por "taskid", "" // Para aislar de la dependencia de Mailbox <> .db
+                ' Check if there si such duty with the given id
+                entryIDs = DB_DQL(DDBB_Athena_file_path & DDBB_Athena_file_data, ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_DUTY_COD(idDuty), verbose)
+                If Not IsEmpty(entryIDs) Then
+                    For i = 0 To UBound(entryIDs)
+                        If Not IsEmpty(entryIDs(i)) Then
+                            On Error Resume Next
+                            Set oMail = Outlook.Application.GetNamespace("MAPI").GetItemFromID(entryIDs(i)(0))
+                            If Not oMail Is Nothing Then
+                                If MsgBox("Quiere asociarlo a esta conversación?" & vbNewLine & vbNewLine & oMail.ConversationTopic, vbQuestion + vbYesNo + vbDefaultButton2, "Merge Conversation") = vbYes Then
+                                    Athena_Mail_set_conversation SelectedObject, oMail.ConversationTopic, oMail.PropertyAccessor.GetProperty(PR_CONVERSATION_INDEX)
+                                End If
+                            End If
+                        End If
+                    Next
+                End If
+            End If
+            If oMail Is Nothing Then
+                MsgBox "Id no valido"
+            End If
+        End If
+    End If
+ErrHndlr:
+    Set inboxFolder = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'botonPlanificadas
+Public Sub botonPlanificadas()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    'Dim inboxFolder As Outlook.Folder
+    Dim tokenStamp As Outlook.mailItem
+    Dim token As Outlook.mailItem
+    Dim DirBuzon As String: DirBuzon = getMailBox()
+    Dim usrLogIn As String: usrLogIn = getUserLogin
+    Dim yo As String: yo = getUserName(usrLogIn)
+    Dim t_stamp As String: t_stamp = Format(Now, Athena_FullTime_Pattern)
+    
+    Dim i As Long
+    Dim K As Long
+    
+    Dim insLaunched As String
+    Dim sep As String: sep = ""
+    Dim queryVariant As Variant: ReDim queryVariant(0 To 0) As Variant
+    Dim dbVariant As Variant: ReDim dbVariant(0 To 0) As Variant
+    Dim dbsTotal As Long: dbsTotal = 0
+    Dim strDbFile As String: strDbFile = ""
+    
+    Set tokenStamp = getPlannToken(getPlannFolders)
+    Dim estaLibre As Boolean: estaLibre = Not (isPlannTokenRunning(tokenStamp))
+    
+    Traza lgINFO, "1. Athena_Get_Launched_Planned_Tasks", "Planificadas"
+    
+    ' Check if there is anyone generating planned tasks
+    If Not (estaLibre) Then
+        estaLibre = MsgBox("Ya hay alguien lanzando las tareas planificadas. ¿Está seguro que quiere continuar?", vbYesNo) = vbYes
+    End If
+    If estaLibre Then
+        ' *** Get Time Stamps ****
+        Dim t_now As String: t_now = Left(Split(t_stamp, " ")(1), 5)
+        Dim t_last As String: t_last = getPlannTokenLastTime(tokenStamp)
+        
+        ' *** Refresh Token Stamp ***
+        setPlannToken tokenStamp, False, yo, t_stamp
+        
+        Dim launchedTasks As String: launchedTasks = "''" ' *** OLD *** Athena_Get_Launched_Planned_Tasks(DirBuzon)
+        
+        ' Get Pending planned tasks
+        ' (0) AREA_DEPT_COD, (1) UNIT_COD, (2) AREA_DEPT_CAT_COD, (3) AREA, (4) UNIT, (5) CAT, (6) DESC, (7) DB_FILE, (8) DETAIL, (9) SCHEDULLE
+        Dim entryIDs As Variant: entryIDs = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_PLANNED_DUTIES_3_0(DirBuzon, t_last, t_now), verbose)
+        If Not IsEmpty(entryIDs) And VariantSize(entryIDs) > 0 Then
+            
+            '   QUERY BBDD >> DUTY_PLANNED_EXECUTED
+            insLaunched = "INSERT INTO DUTY_PLANNED_EXECUTED (AREA_DEPT_CAT_COD, `DESC`, MARK_DAY, `WHO`, `WHEN_STAMP`) SELECT A.* FROM ( "
+            
+            For i = 0 To UBound(entryIDs)
+                If Not IsEmpty(entryIDs(i)) Then
+                    'GET GLOBAL_MATRIX_UNITS
+                    Dim GLOBAL_CATEGORY_COD As String: GLOBAL_CATEGORY_COD = entryIDs(i)(2)
+                    Dim GLOBAL_COUNTRY_COD As String: GLOBAL_COUNTRY_COD = entryIDs(i)(1)
+                    Dim GLOBAL_CATEGORY As String: GLOBAL_CATEGORY = entryIDs(i)(5)
+                    Dim GLOBAL_MATRIX_UNITS As String: GLOBAL_MATRIX_UNITS = ""
+                    Dim athena_matrix_list As Variant 'Almacena un array de ternas (UNIT, AREA_DEPT_CAT_COD, PERCENTAJE)
+                    If GLOBAL_COUNTRY_COD = UNIT_CROSS_COD Then
+                        athena_matrix_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(GLOBAL_CATEGORY_COD), verbose)
+                        If IsEmpty(athena_matrix_list(0)) Or athena_matrix_list(0)(0) = "" Then
+                            MsgBox "No se ha definido Matriz de reparto para:" & vbNewLine & vbTab & vbNewLine & Replace(GLOBAL_CATEGORY, "#", vbNewLine & vbTab & "#") & "'"
+                        Else
+                            For K = 0 To VariantSize(athena_matrix_list) - 1
+                                'Guarda la etiqueta pais en el combo
+                                GLOBAL_MATRIX_UNITS = GLOBAL_MATRIX_UNITS & athena_matrix_list(K)(0) & SEP_TOKEN
+                            Next
+                            GLOBAL_MATRIX_UNITS = Left(GLOBAL_MATRIX_UNITS, Len(GLOBAL_MATRIX_UNITS) - 1)
+                        End If
+                    End If
+ 
+                    Dim tituloTarea As String: tituloTarea = searchPatternAndReplaceDate(entryIDs(i)(6)) 'Cambiamos String fecha yyyy.mm.dd por su valor (Dia previo)
+                    'LOGICA DE DRAFT/TOKEN
+                        'GLOBAL_TITLE_FULL, GLOBAL_NUM_ACTIONS, _
+                        'GLOBAL_AREA_COD, GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+                        'GLOBAL_TIME_ADJUST, GLOBAL_TIME_START, GLOBAL_TIME_END, _
+                        'GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
+                        'GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
+                        'GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, COMMENTS, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR
+                        'GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS
+'                    Dim formVars() As String: formVars = StringArray(tituloTarea, 1, _
+'                            entryIDs(i)(0), GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+'                            False, 0, 0, _
+'                            True, True, Athena_Mail_OwnerCod_UnAssigned, Athena_Token_origin_Planned_Cod, _
+'                            entryIDs(i)(3), entryIDs(i)(4), GLOBAL_CATEGORY, Athena_Mail_Owner_UnAssigned, Athena_Mail_PriorityCod_Normal, Athena_Mail_Priority_Cliente, _
+'                            "", "", entryIDs(i)(8), Athena_Token_origin_Planned, "", "", _
+'                            "", "", GLOBAL_MATRIX_UNITS)
+                    
+                    Dim formVars() As String: formVars = StringArray(tituloTarea, 1, _
+                            entryIDs(i)(0), GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+                            False, 0, 0, _
+                            True, True, Athena_Mail_OwnerCod_UnAssigned, _
+                            entryIDs(i)(3), entryIDs(i)(4), GLOBAL_CATEGORY, Athena_Mail_Owner_UnAssigned, Athena_Mail_PriorityCod_Normal, Athena_Mail_Priority_Cliente, _
+                            "", "", entryIDs(i)(8), "", "", _
+                            "", "", GLOBAL_MATRIX_UNITS)
+                    
+                    '   TOKEN >> CREA BORRADOR (con ID)
+                    Set token = Athena_Token_Init(Nothing, formVars, Athena_Mail_Status_UnAssigned, getIdDuty)
+                    
+                    ' Acumulamos query Ins
+                    ' Si 1º o misma DB....
+                    If strDbFile = "" Or strDbFile = entryIDs(i)(7) Then
+                        strDbFile = entryIDs(i)(7)
+                        '   QUERY BBDD >> DUTY_PLANNED_EXECUTED
+                        insLaunched = insLaunched & sep & " SELECT " & entryIDs(i)(2) & ", '" & entryIDs(i)(6) & "', strftime('%Y%m%d', date('now','localtime')), '" & usrLogIn & "','" & t_stamp & "' "
+                        sep = vbNewLine & " UNION ALL "
+                    ' Si Cambia
+                    ElseIf strDbFile <> entryIDs(i)(7) Then
+                        ' Cerramos Ins
+                        insLaunched = insLaunched & vbNewLine & " ) AS A;"
+                    
+                        ' Guardamos Prev
+                        queryVariant(dbsTotal) = insLaunched ' Actualizar Query a lanzar
+                        dbVariant(dbsTotal) = strDbFile ' DB al que lanzar
+                        
+                        ' Incrementamos
+                        ReDim Preserve queryVariant(0 To UBound(queryVariant) + 1)
+                        ReDim Preserve dbVariant(0 To UBound(dbVariant) + 1)
+                        
+                        ' Preparamos siguiente y Resteamos Ins
+                        dbsTotal = dbsTotal + 1
+                        strDbFile = entryIDs(i)(7) ' 1º DB
+                        insLaunched = "INSERT OR REPLACE INTO DUTY_PLANNED_EXECUTED (AREA_DEPT_CAT_COD, `DESC`, MARK_DAY, `WHO`, `WHEN_STAMP`) SELECT A.* FROM ( " _
+                                    & vbNewLine & " SELECT " & entryIDs(i)(2) & ", '" & entryIDs(i)(6) & "', strftime('%Y%m%d', date('now','localtime')), '" & usrLogIn & "','" & t_stamp & "' "
+                    End If
+                End If
+            Next
+            
+            ' Cerramos ultimo Ins y guardamos
+            insLaunched = insLaunched & vbNewLine & " ) AS A;"
+            ' Guardamos Prev
+            queryVariant(dbsTotal) = insLaunched ' Actualizar Query a lanzar
+            dbVariant(dbsTotal) = strDbFile ' DB al que lanzar
+            Traza lgINFO, "4. fin bucle", "Planificadas"
+            
+            Traza lgINFO, "5. llamando a Insert CreaDuties", "Planificadas"
+            '   RECORD IT EXECUTION
+            For i = 0 To UBound(queryVariant)
+                ' TODO Aislar Mailbox <> .db
+                'DB_DML DDBB_Athena_file_path & DDBB_Athena_file_data, queryVariant(i), verbose
+            Next
+            
+            Traza lgINFO, "8. Fin actualizar generacion eventos", "Planificadas"
+        Else
+            MsgBox "No hay planificadas"
+        End If
+        
+        ' Release
+        'Athena_Reserve_Launched_Planned_Tasks (True)
+        
+        ' *** Refresh Token Stamp ***
+        setPlannToken tokenStamp, True, yo, Format(Now, Athena_FullTime_Pattern)
+    End If
+ErrHndlr:
+    Set token = Nothing
+    Set entryIDs = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+Public Sub botonIniciar()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim error As String: error = ""
+    Dim SelectedObject As Object
+    Dim SelectedMail As Outlook.mailItem
+    
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count = 1 Then
+        Set SelectedObject = Application.ActiveExplorer.Selection.item(1)
+    End If
+    
+    ' (Sin seleccion) No se ha seleccionado nada. Crear tarea. Mostrar formulario
+    If (SelectedObject Is Nothing) Then
+        ejecutaEscenarioInicio Nothing
+    ' (Seleccionado)
+    Else
+        'La selección es un mail
+        If (TypeOf SelectedObject Is Outlook.mailItem) Then
+            
+            'La selección es un mail ordinario
+            If (Not Athena_isTokenType(SelectedObject)) Then
+                ejecutaEscenarioInicio SelectedObject
+            
+            'La selección es un token
+            Else
+                Dim status As String: status = Athena_Token_get_Status(SelectedObject)
+                Dim category As String: category = Athena_Token_get_Categoria(SelectedObject)
+                Dim owner As String: owner = Athena_Token_get_EmployeeOwner(SelectedObject)
+        
+                'Token sin clasificar (mostramos formulario)
+                If (status = Athena_Mail_Status_NoClassify _
+                    Or (status = Athena_Mail_Status_Classifying And owner = getUserLogin)) Then
+                    ejecutaEscenarioInicio SelectedObject
+                
+                'Token pausado o sin asignar (no necesita formulario)
+                ElseIf (status = Athena_Mail_Status_Stopped _
+                        Or status = Athena_Mail_Status_UnAssigned) Then
+                    ejecutaEscenarioContinua SelectedObject
+                
+                'Token finalizado
+                ElseIf (status = Athena_Mail_Status_End) Then
+                    ejecutaEscenarioContinuaForzado SelectedObject
+                    
+                'Token descartado
+                ElseIf (status = Athena_Mail_Status_Discarted) Then
+                    ' Si descartado - viene de No Clasificado => (mostramos formulario)
+                    If category = "" Then
+                        If (MsgBox("Va a continuar una tarea descartada sin clasificar. ¿Está seguro?", vbYesNo) = vbYes) Then
+                            ejecutaEscenarioInicio SelectedObject
+                        End If
+                    ' Si descartado - está Clasificado => Reabrir
+                    Else
+                        ejecutaEscenarioContinuaForzado SelectedObject
+                    End If
+                
+                'Token iniciado. Clonar tarea
+                ElseIf (status = Athena_Mail_Status_Started And owner <> getUserLogin) Then
+                    ejecutaClonado SelectedMail
+                
+                'Token Clasificando
+                ElseIf (status = Athena_Mail_Status_Classifying) Then
+                    MsgBox "Clasificación en curso " & owner & ". Ya hay alguien clasificando esta tarea"
+                
+                Else
+                    MsgBox "Selección no válida"
+                End If
+            End If
+        Else
+            MsgBox "no seleccione reuniones"
+        End If
+    End If
+    If error <> "" Then MsgBox error
+ErrHndlr:
+    If Err Then
+        Dim errorDesc As String: errorDesc = Err.Number & " " & Err.Description
+        Call Traza(lgFATAL, (Err.Number & " " & Err.Description), "botonIniciar")
+        MsgBox errorDesc
+    End If
+
+    Set SelectedObject = Nothing
+    Set SelectedMail = Nothing
+End Sub
+
+'botonPausar
+
+'Pausar.
+'Lógica a efectuar cuando se pulsa el botón de PAUSE sobre el token
+' Si el elemento seleccionado es un token:
+'       - Si está Started:
+'            Editar su estado a Stopped
+'            Insertar evento PAUSA
+'       - si está en otro estado: Mensaje de error
+
+'Pausar.
+'Lógica a efectuar cuando se pulsa el botón de PAUSE
+' Si no hay correo seleccionado: no se hace nada
+' Si el elemento seleccionado es un token:
+'       - Si está Started: Editar su estado a Stopped
+'       - si está en otro estado: Mensaje de error
+' Si el elemento seleccionado es un mail, dos opciones:
+'      A. Mostrar mensaje de error (Opción elegida inicialmente)
+'      B. Buscar su token asociado y aplicar lógica de pausado. (a valorar implementación futura)
+
+Public Sub botonPausar()
+On Error GoTo ErrHndlr
+    Dim error As String
+    Dim myOlExp As Outlook.Explorer
+    Dim myOlSel As Outlook.Selection
+    Dim selectedFolder As Outlook.Folder
+    Dim SelectedObject As Object
+    Dim SelectedMail As Outlook.mailItem
+    error = ""
+
+    If initUserPath = -1 Then Exit Sub
+    
+    Set myOlExp = Application.ActiveExplorer
+    Set myOlSel = myOlExp.Selection
+    Set selectedFolder = myOlExp.currentFolder
+
+    ' Something is selected
+    If myOlSel.Count = 1 Then
+        Set SelectedObject = myOlSel.item(1)
+    End If
+    
+    If (SelectedObject Is Nothing) Then  'Sin seleccion.
+        error = err_token_not_selected
+    Else
+        If (Not Athena_isTokenType(SelectedObject)) Then   'La selección es un mail
+            error = err_token_not_selected
+        Else
+            Set SelectedMail = SelectedObject
+            ejecutaEscenarioPausa SelectedObject
+        End If
+    End If
+    If error <> "" Then
+        MsgBox error
+    End If
+ErrHndlr:
+    Set myOlExp = Nothing
+    Set myOlSel = Nothing
+    Set selectedFolder = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'botonSaveView
+Public Sub botonSaveView()
+    If initUserPath = -1 Then Exit Sub
+    doSaveAthenaView
+End Sub
+
+'botonSetUpView
+Public Sub botonSetUpView()
+    If initUserPath = -1 Then Exit Sub
+    doSetUpAthenaView
+End Sub
+
+'botonFinalizar
+Public Sub botonFinalizar()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    Dim error As String: error = ""
+    
+    Dim SelectedObject As Object
+    Dim SelectedMail As Outlook.mailItem
+    
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count >= 1 Then
+        For Each SelectedObject In Application.ActiveExplorer.Selection
+            If (SelectedObject Is Nothing) Then  'Sin seleccion.
+                MsgBox err_token_not_selected
+            Else    ' SelectedObject >> Token
+                If (Athena_isTokenType(SelectedObject)) Then   'La selección es un Token
+                    Dim owner As String: owner = Athena_Token_get_EmployeeOwner(SelectedObject)
+                    Dim flag_entra As Boolean: flag_entra = True
+                    If (owner <> getUserLogin) Then flag_entra = MsgBox("Va a finalizar una tarea de otro (" & Athena_Token_get_Owner(SelectedObject) & "). ¿Está seguro?", vbYesNo, "Finalizar tarea") = vbYes
+                    If (flag_entra) Then
+                        Traza lgINFO, Athena_Token_get_Title(SelectedObject) & " Finalizando!", "botonFinalizar"
+                        ejecutaEscenarioFinaliza SelectedObject
+                    End If
+                End If
+            End If
+        Next
+    End If
+    Application.ActiveExplorer.CurrentView.Apply
+ErrHndlr:
+    Set SelectedObject = Nothing
+    Set SelectedMail = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+
+'botonEditar
+
+Public Sub botonEditar()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim error As String: error = ""
+    Dim SelectedObject As Object
+    Dim SelectedMail As Outlook.mailItem
+    
+    ' Something is selected
+    If Outlook.Application.ActiveExplorer.Selection.Count = 1 Then Set SelectedObject = Outlook.Application.ActiveExplorer.Selection.item(1)
+    
+    If (SelectedObject Is Nothing Or Not Athena_isTokenType(SelectedObject)) Then  'Sin seleccion.
+        error = err_token_not_selected
+    Else
+        'TODO Abrir formulario y mostrar valores originales
+        Dim EditForm As New TaskManagerForm
+        
+        EditForm.GLOBAL_MAILBOX = getMailBox()
+        Set EditForm.token = SelectedObject
+        EditForm.EDIT_MODE = True
+        EditForm.GLOBAL_TITLE_ORIGINAL = Athena_Token_get_Name(EditForm.token)
+
+        EditForm.Show
+    End If
+    If error <> "" Then MsgBox error
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+
+'botonDescartar
+
+Public Sub botonDescartar()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim error As String: error = ""
+    
+    Dim SelectedObject As Object
+    Dim SelectedMail As Outlook.mailItem
+
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count >= 1 Then
+        For Each SelectedObject In Application.ActiveExplorer.Selection
+            If (SelectedObject Is Nothing) Then  'Sin seleccion.
+                MsgBox err_token_not_selected
+            Else
+                ' SelectedObject >> Email
+                If (Not Athena_isTokenType(SelectedObject)) Then   'La selección es un mail
+                    Set SelectedMail = SelectedObject
+                    ' Set up email Category (Discard) => No trace / (Related) => has trace // No Slash on category to not "print" category icon
+                    If Get_Draft_From_Email(SelectedMail) Is Nothing Then
+                        SelectedMail.categories = Replace(Athena_Mail_Status_Discarted, "#", "")
+                    Else
+                        SelectedMail.categories = Replace(Athena_Mail_Status_Discarted_Related, "#", "")
+                    End If
+                    SelectedMail.UserProperties.Add(Athena_Column_Solver, olText).value = getUserName(getUserLogin())
+                    SelectedMail.UnRead = False
+                    SelectedMail.Save
+                ' SelectedObject >> Token
+                Else
+                    Traza lgINFO, Athena_Token_get_Title(SelectedObject) & " Descartando!", "botonDescartar"
+                    ejecutaEscenarioDescarte SelectedObject
+                End If
+            End If
+        Next
+    End If
+    Application.ActiveExplorer.CurrentView.Apply
+ErrHndlr:
+    Set SelectedObject = Nothing
+    Set SelectedMail = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+
+'botonGenerarTokenCorreosEntrantes
+
+Public Sub botonGenerarTokenCorreosEntrantes()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim i As Long: i = 1
+    ' Qué es población objetivo
+    '   - Descartar X Correo (por asunto?- Autoreply)
+    '   - Solo tratar MailItems
+    '   - Mails **nuevos** sobre Conversaciones sin ningún token (posterior)
+    '   - Mail más antiguo
+    
+    'Declarations
+    
+    Dim convTopic As String
+    Dim oRow As Outlook.row
+    Dim oTableConv As Outlook.table
+    Dim oTableReceived As Outlook.table
+    
+    Dim oItem As Outlook.row
+    Dim oMail As Outlook.mailItem
+    
+    'Get a Folder object for the Inbox
+    Dim oFolder As Outlook.Folder: Set oFolder = Get_Inbox_Folder(Application.ActiveExplorer.currentFolder)
+  
+    'Define Filter to obtain items last modified today
+    Dim Filter As String: Filter = "[ReceivedTime] >= '" & getDatePrev(Athena_FilterMail_Pattern) & "'" '4/7/2023'"
+    Set oTableReceived = oFolder.GetTable(Filter)
+    oTableReceived.Sort "[ReceivedTime]", True
+    
+    'Remove all columns in the default column set and Specify desired properties
+    oTableReceived.Columns.RemoveAll
+    With oTableReceived.Columns
+        .Add ("EntryID")
+        .Add ("SenderName")
+        .Add ("ConversationTopic")
+        .Add ("CC")
+        .Add ("MessageClass")
+        .Add ("ReceivedTime")
+        .Add ("Categories")
+        .Add ("ReceivedByName")
+        .Add ("SenderName")
+    End With
+    
+    'Enumerate the table using test for EndOfTable
+    Do Until (oTableReceived.EndOfTable)
+        Set oRow = oTableReceived.GetNextRow()
+        If verbose Then Debug.Print (i) & vbTab & oRow("ConversationTopic") & vbTab & oRow("ReceivedTime") & vbTab & oRow("Categories") & vbTab & oRow("SenderName")
+        Set oTableConv = oTableReceived.Restrict("[ConversationTopic] = " & Chr(34) & Replace(Replace(oRow("ConversationTopic"), "'", Chr(39)), Chr(34), "") & Chr(34))
+        Do Until (oTableConv.EndOfTable)
+            Set oItem = oTableConv.GetNextRow()
+            ' Only Mark Mails and received (not copied from sent) and Outer senders
+            If oItem("MessageClass") = "IPM.Note" And Not IsEmpty(oItem("ReceivedByName")) And oItem("ReceivedByName") <> oItem("SenderName") Then
+                Set oMail = Outlook.Application.GetNamespace("MAPI").GetItemFromID(oItem("EntryID"))
+                If Not oMail Is Nothing Then
+                    If Athena_isTokenMarked(oMail) Or _
+                    oMail.SentOnBehalfOfName = oMail.ReceivedOnBehalfOfName Or _
+                    oMail.SentOnBehalfOfName = Outlook.Application.Session.CurrentUser.name Then Exit Do ' Stop at first marked mail / MailBox Mail / Personal Mail
+                    
+                    oMail.categories = Athena_Mail_Status_NoClassify
+                    oMail.Save
+                    Set oMail = Nothing
+                End If
+            ' Token's does not have Sender
+            Else
+                If oItem("MessageClass") = "IPM.Note" Then
+                    Set oMail = Outlook.Application.GetNamespace("MAPI").GetItemFromID(oItem("EntryID"))
+                    If Not oMail Is Nothing Then If Athena_isTokenMarked(oMail) Or _
+                    oMail.SentOnBehalfOfName = oMail.ReceivedOnBehalfOfName Or _
+                    oMail.SentOnBehalfOfName = Outlook.Application.Session.CurrentUser.name Then Exit Do    ' Stop at first marked mail / MailBox Mail / Personal Mail
+                End If
+            End If
+        Loop
+        Set oTableConv = Nothing
+        i = i + 1
+    Loop
+ErrHndlr:
+    Set oMail = Nothing
+    Set oItem = Nothing
+    Set oRow = Nothing
+    Set oTableConv = Nothing
+    Set oTableReceived = Nothing
+    Set oFolder = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+Public Function botonCopyPasteConversation() As Outlook.mailItem
+On Error GoTo ErrHndlr
+    Dim SelectedObject As Object: Set SelectedObject = getItemSelected()
+
+    If (SelectedObject Is Nothing) Then  'Sin seleccion.
+        MsgBox "No ha selecionado nada"
+    Else
+        If (Not Athena_isTokenType(SelectedObject)) Then   'La selección es un mail
+            If tokenCopied Is Nothing Then
+                MsgBox "No se ha copiado un token, seleccione primero el token, copie y luego pegue en el mail"
+            Else
+                If MsgBox("Quiere asociarlo a esta conversación?" & vbNewLine & vbNewLine & tokenCopied.ConversationTopic, vbQuestion + vbYesNo + vbDefaultButton2, "Merge Conversation") = vbYes Then
+                    Athena_Mail_set_conversation SelectedObject, tokenCopied.ConversationTopic, tokenCopied.PropertyAccessor.GetProperty(PR_CONVERSATION_INDEX)
+                End If
+            End If
+        Else
+            Set tokenCopied = SelectedObject
+            MsgBox "Copiada la esta conversación?" & vbNewLine & vbNewLine & tokenCopied.ConversationTopic
+        End If
+    End If
+ErrHndlr:
+    Set SelectedObject = Nothing
+    'If Err Then MsgBox Err.Number & " " & Err.Description    'comentamos linea dado que empezó a lanzar error 53 sin sentido.El objeto se encuentra y lo recupera
+End Function
+
+
+'botonTimeReview
+Public Sub botonTimeReview()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim error As String: error = ""
+    Dim SelectedObject As Object: Set SelectedObject = getItemSelected()
+
+    If (SelectedObject Is Nothing) Then  'Sin seleccion.
+        error = err_token_not_selected
+    Else
+        If (Not Athena_isTokenType(SelectedObject)) Then   'La selección es un mail
+            error = err_token_not_selected
+        Else
+            Dim miTimeManager As New TimeManagerForm
+            Set miTimeManager.token = SelectedObject
+            miTimeManager.ddbb_data_f = DDBB_Athena_file_data(SelectedObject)
+            miTimeManager.Show
+
+            Set miTimeManager = Nothing
+        End If
+    End If
+    If error <> "" Then
+        MsgBox error
+    End If
+ErrHndlr:
+    Set SelectedObject = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'botonReportingMio
+Public Sub botonReportingMio()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    Dim msg As String: msg = ""
+    Dim ddbb_data_dest As String: ddbb_data_dest = DDBB_Athena_file_data
+    Dim ddbb_data_unified As String: ddbb_data_unified = DDBB_Athena_local_file_path & "ATHENA_NET_DATA_MIO.db"
+    Dim owner As String: owner = getUserLogin
+    
+    
+    If Len(Dir$(DDBB_Athena_local_file_path & ddbb_data_dest)) > 0 Then
+        ' Upload local db usr Info
+        doUploadUsrDB
+        
+        ''LLEVAR A METODO GENÉRICO
+        ' Copy Data to MIO
+        FileCopy DDBB_Athena_local_file_path & ddbb_data_dest, ddbb_data_unified
+        
+        ' APPEND _NET
+        Call DB_MERGE(DDBB_Athena_local_file_path & DDBB_Athena_file, ddbb_data_unified, verbose)
+        
+        ' Clear not mine
+        Call DB_DML(ddbb_data_unified, "DELETE FROM DUTY_EVENT WHERE DUTY_EVENT.EVENT_COD = '1' AND DUTY_EVENT.VALUE IN ('5')", verbose)
+        Call DB_DML(ddbb_data_unified, "DELETE FROM DUTY_EVENT WHERE DUTY_EVENT.EVENT_COD = '1' AND DUTY_EVENT.VALUE IN ('2') AND DUTY_EVENT.WHO_ID <> '" & owner & "'", verbose)
+        Call DB_DML(ddbb_data_unified, "DELETE FROM DUTY WHERE DUTY_COD NOT IN (SELECT DUTY_COD FROM DUTY_EVENT WHERE DUTY_EVENT.WHO_ID = '" & owner & "' AND DUTY_EVENT.EVENT_COD = '1' GROUP BY DUTY_COD) OR DUTY_COD IS NULL ", verbose)
+        Call DB_DML(ddbb_data_unified, "DELETE FROM DUTY_EVENT WHERE DUTY_COD NOT IN (SELECT DUTY_COD FROM DUTY GROUP BY DUTY.DUTY_COD)", verbose)
+        
+        '--DATA ... CLEAR REPORTING STRUCTURE
+        Call DB_DDL(ddbb_data_unified, "DROP VIEW IF EXISTS DUTY_TIME_REPORT", verbose) ' DUTY_TIME_REPORT
+        Call DB_DDL(ddbb_data_unified, "DROP TABLE IF EXISTS DUTY_TEMP_TIME_TRACE", verbose)    ' DUTY_TEMP_TIME_TRACE
+        Call DB_DDL(ddbb_data_unified, "DROP VIEW IF EXISTS DUTY_TIME_TRACE", verbose)  ' DUTY_TIME_TRACE
+        Call DB_DDL(ddbb_data_unified, "DROP VIEW IF EXISTS REPORT_DUTY", verbose)      ' REPORT_DUTY
+        Call DB_DDL(ddbb_data_unified, "DROP VIEW IF EXISTS REPORT_DUTY_TRACE", verbose) ' REPORT_DUTY_TRACE
+        Call DB_DDL(ddbb_data_unified, "UPDATE duty_event set ENTRY_ID=''", verbose) ' Clear entry_id
+        Call DB_DDL(ddbb_data_unified, "UPDATE duty set TOKEN_ENTRY_ID=''", verbose) ' Clear entry_id
+         
+        msg = "MIO generado!"
+        'msg = calc_reporting_myself(ddbb_data_unified, owner)
+    Else
+        msg = "No tienes db"
+    End If
+    MsgBox msg
+    
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'botonReporting
+Public Sub botonReporting()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim msg As String
+    Dim mailbox As String
+    Dim ddbb_file As String
+    
+    ' Download remote info into local
+    ddbb_file = DDBB_Athena_file_data
+    dwnloadRemoteData ddbb_file, True
+    
+    mailbox = Get_Inbox_Folder(Application.ActiveExplorer.currentFolder).Parent.name
+    ' Sometimes outlook account mapped returns mailbox name instead of email adress
+    If Not (IsEmailAddress(mailbox)) Then
+        Dim emails As Variant: emails = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS(mailbox), verbose)
+        If Not (IsEmpty(emails)) And UBound(emails) >= 0 Then
+            mailbox = emails(0)(0)
+        End If
+    End If
+    
+    ' Do calcs
+    msg = launchReporting(mailbox, DDBB_Athena_local_file_path & ddbb_file)
+
+    ' Export to CSV
+    'Call ExportTable2CSV(DDBB_Athena_local_file_path & ddbb_file, "SELECT * FROM REPORT_DUTY;", Format(Now, Athena_TimeStamp_Pattern) & "_REPORT_DUTY.csv")
+    'Call ExportTable2CSV(DDBB_Athena_local_file_path & ddbb_file, "SELECT * FROM REPORT_DUTY_TRACE;", Format(Now, Athena_TimeStamp_Pattern) & "_REPORT_DUTY_TRACE.csv")
+    
+    MsgBox "BAU Generado!" '"Check" 'JTODO
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+Public Sub botonReporingFull()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    Dim ddbb_file As String: ddbb_file = "ATHENA_NET_DATA_BAU.db"
+    
+    ' Get user
+    Dim userL As String: userL = getUserLogin
+    
+    ' Get email mailbox requesting
+    Dim emailXml As String: emailXml = Athena_Get_MailBoxEmail
+    
+    ' Only Admin
+    If Not IsUserValidInMailBox(userL, emailXml, True, False) Then
+        MsgBox "Acción no permitida"
+    Else
+        ' Donwload and generate merged file
+        dwnloadAllRemoteUsrData emailXml, ddbb_file
+        
+        ' Historify
+        doHistorify DDBB_Athena_local_file_path & ddbb_file
+        
+        MsgBox "Historificado!"
+    End If
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+Public Sub botonReporingBAU()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    Dim ddbb_file As String: ddbb_file = "ATHENA_NET_DATA_BAU.db"
+    
+    ' Get user
+    Dim userL As String: userL = getUserLogin
+    
+    ' Get email mailbox requesting
+    Dim emailXml As String: emailXml = Athena_Get_MailBoxEmail
+    
+    ' Only Admin/SuperVisor
+    If Not IsUserValidInMailBox(userL, emailXml, True, True) Then
+        MsgBox "Acción no permitida"
+    Else
+        ' Donwload and generate merged file
+        dwnloadAllRemoteUsrData emailXml, ddbb_file
+            
+        MsgBox "BAU generado!"
+    End If
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'botonAsignarCategoria
+
+Public Sub botonPush()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+
+    Dim error As String: error = ""
+    Dim SelectedObject As Object
+    Dim item
+    If Application.ActiveExplorer.Selection.Count >= 1 Then
+        For Each item In Application.ActiveExplorer.Selection
+            Set SelectedObject = item
+            If Athena_isTokenType(SelectedObject) Then
+                If Athena_Token_push(SelectedObject) Then
+                    Debug.Print Athena_Token_get_Title(SelectedObject) & " Synchronized!"
+                    Traza lgINFO, Athena_Token_get_Title(SelectedObject) & " Synchronized!", "botonPush"
+                Else
+                    MsgBox "Algo fue mal, reintenta más tarde"
+                End If
+            End If
+        Next item
+    End If
+    MsgBox "Fin"
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+    Set SelectedObject = Nothing
+End Sub
+
+'botonIncidenciaOp
+Public Sub botonIncidenciaOp()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim SelectedObject As Object
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count = 1 Then Set SelectedObject = Application.ActiveExplorer.Selection.item(1)
+
+    ' (Sin seleccion) No se ha seleccionado nada. Crear tarea. Mostrar formulario
+    If (SelectedObject Is Nothing) Then
+        error = err_token_not_selected
+    Else    ' (Seleccionado)
+        'La selección es un mail
+        If (TypeOf SelectedObject Is Outlook.mailItem) Then
+            'La selección es un mail ordinario
+            If (Athena_isTokenType(SelectedObject)) Then
+                Dim IncOpF As New IncOpForm: Set IncOpF.token = SelectedObject
+                IncOpF.Show
+            Else
+                error = err_token_not_selected
+            End If
+        End If
+    End If
+    If error <> "" Then MsgBox error
+ErrHndlr:
+    Set SelectedObject = Nothing
+End Sub
+
+Public Sub botonAsignarRealizador()
+On Error GoTo ErrHndlr
+    If initUserPath = -1 Then Exit Sub
+
+    Dim error As String: error = ""
+    Dim SelectedObject As Object
+    ' Something is selected
+    Dim item As Object
+    'El primer token leido indicará la opción comercial. Solo se reasignarán token de la misma opción comercial
+    Dim isFirst As Boolean: isFirst = True
+    Dim firstAreaDeptCod As Integer
+    Dim firstTitle As String
+    
+    If Application.ActiveExplorer.Selection.Count >= 1 Then
+        ' Take 1º element as example
+        Dim ReassignF As New ReassignForm: Set ReassignF.token = Application.ActiveExplorer.Selection.item(1)
+        firstAreaDeptCod = Athena_Token_get_AreaDeptCod(ReassignF.token)
+        firstTitle = Athena_Token_get_Title(ReassignF.token)
+        ReassignF.Show
+        ' Apply ownership to all selected items
+        For Each item In Application.ActiveExplorer.Selection
+            Set SelectedObject = item
+            If (SelectedObject Is Nothing) Then  'Sin seleccion.
+                error = err_token_not_selected
+            Else
+                If (Not Athena_isTokenType(SelectedObject)) Then   'La selección es un mail
+                    error = err_token_not_selected
+                Else
+                    'Comprobar estado válido (pausada, sin asignar)
+                    If Athena_cToken.Athena_Token_get_Status(SelectedObject) = Athena_Mail_Status_UnAssigned Or _
+                        Athena_cToken.Athena_Token_get_Status(SelectedObject) = Athena_Mail_Status_Stopped _
+                    Then
+                        If ReassignF.GLOBAL_CONTROL = ATHENA_CONTROL_OK Then
+                            'Comprobamos si el token seleccionado es de la misma opcion comercial que el primero
+                            If firstAreaDeptCod = Athena_Token_get_AreaDeptCod(SelectedObject) Then
+                                ejecutaEscenarioReasignar SelectedObject, ReassignF.GLOBAL_USER_EMPLOYEE
+                                
+                                Dim formVars() As String: formVars = getFormVarsFromToken(SelectedObject)
+                                
+                                If Trim(clearString(ReassignF.GLOBAL_NOTES)) <> "" Then
+                                    Athena_cToken.Athena_Token_set_Notes SelectedObject, ReassignF.GLOBAL_NOTES
+                                    formVars(CAMPO_COMMENT) = Trim(clearString(ReassignF.GLOBAL_NOTES))
+                                End If
+                                
+                                ' Actualizar campos custom
+                                Athena_Token_set_custom_columns SelectedObject, formVars
+                                SelectedObject.Save
+                            Else
+                                Traza lgFATAL, Athena_Token_get_Title(SelectedObject) & " NO asignado! No pertenece a la misma opcion comercial", "botonAsignarRealizador"
+                                MsgBox Athena_Token_get_Title(SelectedObject) & " NO asignado! No pertenece a la misma opcion comercial que primer token de la selección (" & firstTitle & "). Todos los tokens tienen que pertenecer a la misma opción comercial"
+                            End If
+                        End If
+                    Else
+                        MsgBox "No se puede reasignar en el estado actual:" & Athena_cToken.Athena_Token_get_Status(SelectedObject)
+                    End If
+                End If
+            End If
+            If error <> "" Then MsgBox error
+        Next item
+    End If
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+
+    Set SelectedObject = Nothing
+    Set ReassignF = Nothing
+End Sub
+
+
+Public Sub botonAdvancedFreeze()
+On Error Resume Next
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim olFolder As Outlook.Folder
+    Dim oFolder As Outlook.Folder
+    Dim oTableReceived As Outlook.table
+    Dim oItem As Outlook.mailItem
+    Dim oRow As Outlook.row
+    
+    Dim yo As String: yo = getUserLogin
+    Dim strFilter As String: strFilter = "" ' getUserName(yo) ' // No siempre recupera los mios
+    
+    For Each olFolder In Outlook.Application.GetNamespace("MAPI").Folders
+        Set oFolder = olFolder.Store.GetDefaultFolder(6)
+        
+        If verbose Then Debug.Print "Looking at... " & oFolder.FolderPath
+       
+        'Set oTableReceived = oFolder.GetTable("[CC]='" & Athena_Mail_Status_Started & "'") ' AND [CC]='" & Athena_Mail_Status_Started & "'")
+        Set oTableReceived = oFolder.GetTable("[CC]='" & Athena_Mail_Status_Started & "'")
+        
+        ' Enumerate the table using test for EndOfTable
+        Do Until (oTableReceived.EndOfTable)
+            Set oRow = oTableReceived.GetNextRow()
+            Set oItem = Outlook.Application.GetNamespace("MAPI").GetItemFromID(oRow("EntryID"))
+            ' Owned by me
+            If yo = Athena_Token_get_EmployeeOwner(oItem) Then
+                If verbose Then Debug.Print "Stopping ... " & Athena_Token_get_EmployeeOwner(oItem) & " - " & Athena_Token_get_Status(oItem)
+                ejecutaEscenarioPausa oItem, True
+                Exit For
+            End If
+        Loop
+    Next olFolder
+    
+    Set oRow = Nothing
+    Set oItem = Nothing
+    Set oTableReceived = Nothing
+    Set oFolder = Nothing
+    Set olFolder = Nothing
+End Sub
+
+Public Sub botonBusquedaTokenMiosPendientesBuzonActual()
+    Dim strFilter As String
+    Dim objView As view
+    If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    strFilter = getUserName(getUserLogin)
+    objView.Filter = Chr(40) & _
+        Chr(34) & "http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/.Solver" & Chr(34) & " LIKE '%" & getUserName(getUserLogin()) & "%'" & _
+            " AND " & _
+            Chr(40) & _
+                      Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " <> '" & Athena_Mail_Status_End & "'" & _
+            " AND " & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " <> '" & Replace(Athena_Mail_Status_Discarted, "#", "") & "'" & _
+            " AND " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " <> '" & Athena_Mail_Status_Discarted & "'" & _
+            " AND " & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " <> '" & Replace(Athena_Mail_Status_Discarted_Related, "#", "") & "'" & _
+            " AND " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " <> '" & Athena_Mail_Status_Discarted_Related & "'" & _
+        Chr(41) & _
+    Chr(41)
+    objView.Apply
+End Sub
+
+'botonBusquedaTokenMios
+Public Sub botonBusquedaTokenMios()
+    'Dim strFilter As String
+    Dim objView As view
+    'If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    'strFilter = getUserName(getUserLogin)
+    'objView.Reset
+    'objView.Filter = Chr(34) & "urn:schemas:httpmail:fromname" & Chr(34) & " LIKE '%" & strFilter & "%'"
+    'objView.Save
+    objView.Filter = ""
+    objView.Apply
+    
+    Dim strFilter As String
+    strFilter = getUserName(getUserLogin())
+
+    'Application.ActiveExplorer.Search "from:(" & strFilter & ") cco:(" & strFilter & ") cc:(" & Athena_Mail_Status_NoClassify & ") cc:(" & Athena_Mail_Status_Stopped & ") cc:(" & Athena_Mail_Status_Started & ")", 1
+    Application.ActiveExplorer.Search "from:(" & strFilter & ") cco:(" & strFilter & ") Category:(" & Athena_Mail_Status_NoClassify & ") Category:(" & Athena_Mail_Status_Stopped & ") Category:(" & Athena_Mail_Status_Started & ")", 1
+    Application.ActiveExplorer.Display 'Run the search
+End Sub
+
+'botonBusquedaTokenPendientes
+
+Public Sub botonBusquedaTokenPendientes()
+    Dim strFilter As String
+    Dim objView As view
+    If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    strFilter = getUserName(getUserLogin)
+    'objView.Reset
+    objView.Filter = Chr(40) & _
+        Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Started & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Stopped & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_UnAssigned & "%'" & _
+        " OR " & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoStart & "%'" & _
+        Chr(41)
+    'objView.Save
+    objView.Apply
+End Sub
+
+
+'botonBusquedaTokenSinAsignar
+
+Public Sub botonBusquedaTokenSinAsignar()
+    Dim strFilter As String
+    Dim objView As view
+    If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    'objView.Reset
+    objView.Filter = Chr(40) & _
+        Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_UnAssigned & "%'" & _
+        Chr(41)
+    'objView.Save
+    objView.Apply
+End Sub
+
+Public Sub botonBusquedaTokenSinClasificar()
+On Error Resume Next
+    Dim strFilter As String
+    Dim objView As view
+    If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    'objView.Reset
+    objView.Filter = Chr(40) & _
+        Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & _
+        Chr(41)
+    'objView.Save
+    objView.Apply
+    
+    Dim item As Object
+    For Each item In Application.ActiveExplorer.currentFolder.items '.currentFolder.items
+        If Not (item Is Nothing) Then  'Sin seleccion.
+            'Debug.Print "Entra a revisar..." & item
+            ' SelectedObject >> Mail
+            If (TypeOf item Is Outlook.mailItem) Then
+                
+                If (Len(item.categories) > Len(Replace(item.categories, Athena_Mail_Status_NoClassify, ""))) And (item.UserProperties.item(Athena_Column_Solver) Is Nothing) Then
+                    Dim draft As Object: Set draft = Get_Draft_From_Email(item)
+                    If Not draft Is Nothing Then
+                        item.UserProperties.Add(Athena_Column_Solver, olText).value = draft.SentOnBehalfOfName
+                        item.BCC = draft.SentOnBehalfOfName
+                        item.Save
+                    Else
+                        item.UserProperties.Add(Athena_Column_Solver, olText).value = "Nuevo"
+                        item.BCC = "Nuevo"
+                        item.Save
+                    End If
+                    Dim o As Outlook.mailItem
+                End If
+            End If
+        End If
+    Next
+End Sub
+
+Public Sub botonBusquedaTokenXXX()
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim idDuty As String: idDuty = InputBox("Indique el nº de tarea que quiere buscar", "Searching..")
+    Debug.Print idDuty
+    Dim strFilter As String     '"urn:schemas:httpmail:textdescription" LIKE '%"taskid": %'
+    Application.ActiveExplorer.ClearSearch
+    Application.ActiveExplorer.Search "" & Chr(34) & "taskid" & Chr(34) & ": " & idDuty, 3 ' 1 All Folders / 3 All SubFolders
+    Application.ActiveExplorer.Display
+End Sub
+
+Public Sub botonBusquedaSinSincronizar()
+    If initUserPath = -1 Then Exit Sub
+    
+    Dim strFilter As String    '"urn:schemas:httpmail:textdescription" LIKE '%"synchronized": "N"%'
+    Application.ActiveExplorer.ClearSearch
+    Application.ActiveExplorer.Search "" & Chr(34) & "synchronized" & Chr(34) & ": " & Chr(34) & "N" & Chr(34), 4 ' 1 All Folders / 3 All SubFolders / 4 Buzón Actual
+    Application.ActiveExplorer.Display
+End Sub
+
+Public Sub botonBusquedaRestaurar()
+On Error Resume Next
+    Dim strFilter As String
+    Dim objView As view
+    If initUserPath = -1 Then Exit Sub
+    Set objView = Application.ActiveExplorer.CurrentView
+    'objView.Reset
+    objView.Filter = "" '  "synchronized": "N"
+    'objView.Save
+    objView.Apply
+    
+    Application.ActiveExplorer.ClearSearch
+    
+    ' ReSet General View
+    doSetUpAthenaView
+End Sub
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______MANAGEMENT__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+Private Sub repairTokenDB()
+On Error GoTo ErrHndlr
+Dim error As String: error = ""
+    Dim tokenField As String: tokenField = TOKEN_DB_FILE
+    Dim tokenValue As String: tokenValue = "ATHENA_NET_DATA_FRTB2.db"
+    
+    Dim SelectedObject As Object
+    Dim token As Outlook.mailItem
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count >= 1 Then
+        For Each SelectedObject In Application.ActiveExplorer.Selection
+            If (SelectedObject Is Nothing) Then  'Sin seleccion.
+                MsgBox err_token_not_selected
+            Else    ' SelectedObject >> Token
+                If (Athena_isTokenType(SelectedObject)) Then   'La selección es un Token
+                    Set token = SelectedObject
+                    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
+                    
+                    ' Set
+                    jsonDict(tokenField) = tokenValue
+
+                    token.BodyFormat = olFormatRichText
+                    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
+                    token.Save
+                    Set jsonDict = Nothing
+                    Set token = Nothing
+                End If
+            End If
+        Next
+    End If
+ErrHndlr:
+    Set SelectedObject = Nothing
+    Set token = Nothing
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______TEST__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+
+

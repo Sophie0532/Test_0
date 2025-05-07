@@ -1,0 +1,394 @@
+' DATA MODEL - ATHENA
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+' Mapping Outlook MailBox
+Private Const ATHENA_MD_MAILBOX = "CREATE TABLE IF NOT EXISTS MAILBOX " & _
+                                "(MAILBOX_COD INTEGER PRIMARY KEY AUTOINCREMENT, MAILBOX TEXT, EMAIL TEXT NOT NULL, ENTRY_INBOX TEXT NOT NULL, ENTRY_DRAFT TEXT NOT NULL, ENTRY_SENT TEXT NOT NULL, DDBB_DATA_FILE TEXT, " & _
+                                " CONSTRAINT UNQ UNIQUE (EMAIL));"
+' Record all possible mailbox description
+Private Const ATHENA_MD_MAILBOX_ALIAS = "CREATE TABLE IF NOT EXISTS MAILBOX_ALIAS " & _
+                                "(MAILBOX_ALIAS_COD INTEGER PRIMARY KEY AUTOINCREMENT, MAILBOX_COD INTEGER NOT NULL, ALIAS_DESC TEXT, " & _
+                                " CONSTRAINT UNQ UNIQUE (ALIAS_DESC, MAILBOX_COD));"
+' All availabe Units (San UK, SBGM, SLB, Santander Rio ...)
+Private Const ATHENA_MD_UNIT = "CREATE TABLE IF NOT EXISTS UNIT " & _
+                                "(UNIT_COD INTEGER PRIMARY KEY AUTOINCREMENT, UNIT TEXT, COUNTRY TEXT, " & _
+                                " CONSTRAINT UNQ UNIQUE (UNIT));"
+' TEAM / AREA
+'   |_
+'       DEPT / DIVISION
+Private Const ATHENA_MD_AREA_SYS = "CREATE TABLE IF NOT EXISTS AREA_DEPT " & _
+                                "(AREA_DEPT_COD INTEGER PRIMARY KEY AUTOINCREMENT, AREA TEXT NOT NULL, DEPT TEXT NOT NULL, MAILBOX_COD INTEGER NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (AREA, DEPT));"
+' All available task
+Private Const ATHENA_MD_CATEGORY = "CREATE TABLE IF NOT EXISTS CATEGORY_DUTY " & _
+                                "(CAT_COD INTEGER PRIMARY KEY AUTOINCREMENT, CAT_1 TEXT NOT NULL, CAT_2 TEXT NOT NULL, CAT_3 TEXT NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (CAT_1, CAT_2, CAT_3));"
+' Mapping relation between AREA/DEPT + UNIT + TASK_CATEGORY
+Private Const ATHENA_MD_AREA_UNIT_CATEGORY = "CREATE TABLE IF NOT EXISTS AREA_UNIT_CATEGORY " & _
+                                "(AREA_DEPT_CAT_COD INTEGER PRIMARY KEY AUTOINCREMENT, AREA_DEPT_COD INTEGER NOT NULL, UNIT_COD INTEGER NOT NULL, CAT_COD INTEGER NOT NULL, POS_ORDER INTEGER DEFAULT 0, MPU INTEGER DEFAULT 0, " & _
+                                " CONSTRAINT UNQ UNIQUE (AREA_DEPT_COD, UNIT_COD, CAT_COD));"
+' Mapping CATEGORY
+Private Const ATHENA_MD_VCATEGORY = "CREATE VIEW IF NOT EXISTS CATEGORY AS " & _
+                                "SELECT CAT_COD, TRIM(CAT_1) || (CASE TRIM(CAT_2) WHEN '' THEN '' ELSE ' # ' || TRIM(CAT_2) || ' ' END) || (CASE TRIM(CAT_3) WHEN '' THEN '' ELSE ' # ' || TRIM(CAT_3) || ' ' END) AS CAT FROM CATEGORY_DUTY;"
+' Mapping relation between UNIT + AREA/DEPT
+Private Const ATHENA_MD_AREA_UNIT = "CREATE VIEW IF NOT EXISTS AREA_UNIT AS " & _
+                                " SELECT DISTINCT AREA_DEPT_COD, UNIT_COD " & _
+                                " FROM AREA_UNIT_CATEGORY;"
+'Private Const ATHENA_MD_PAISES = "CREATE TABLE IF NOT EXISTS PAISES ( COD_AREA_SYS INTEGER, PAIS TEXT )"
+
+Private Const ATHENA_USER = "CREATE TABLE IF NOT EXISTS USER " & _
+                                "(USER_COD INTEGER PRIMARY KEY AUTOINCREMENT, USER_EMPLOYEE TEXT NOT NULL, USER_EMAIL TEXT NOT NULL, USER_NAME TEXT NOT NULL, IS_ALIVE INTEGER DEFAULT 0, IS_BLOCKED INTEGER DEFAULT 0, " & _
+                                " CONSTRAINT UNQ UNIQUE (USER_EMPLOYEE));"
+Private Const ATHENA_ROLE = "CREATE TABLE IF NOT EXISTS ROLE " & _
+                                "(ROLE_COD INTEGER PRIMARY KEY AUTOINCREMENT, ROLE_NAME TEXT NOT NULL, READ INTEGER DEFAULT 0, WRITE INTEGER DEFAULT -1, EXE INTEGER DEFAULT -1, " & _
+                                " CONSTRAINT UNQ UNIQUE (ROLE_NAME));"
+Private Const ATHENA_AREA_USER = "CREATE TABLE IF NOT EXISTS AREA_USER " & _
+                                "(AREA_USER_COD INTEGER PRIMARY KEY AUTOINCREMENT, AREA_DEPT_COD INTEGER NOT NULL, USER_COD INTEGER NOT NULL, ROLE_COD INTEGER NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (AREA_DEPT_COD, USER_COD));"
+
+Private Const ATHENA_ORIGIN = "CREATE TABLE IF NOT EXISTS ORIGIN " & _
+                                "(ORIGIN_COD INTEGER PRIMARY KEY AUTOINCREMENT, ORIGIN_NAME TEXT NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (ORIGIN_NAME));"
+                                
+Private Const ATHENA_MD_TASK_PLAN = "CREATE TABLE IF NOT EXISTS DUTY_PLANNED " & _
+                                "(DUTYPLAN_COD INTEGER PRIMARY KEY AUTOINCREMENT, AREA_DEPT_CAT_COD INTEGER NOT NULL, PLANN_COD INTEGER NOT NULL, DESC TEXT NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (AREA_DEPT_CAT_COD, PLANN_COD, DESC));"
+
+
+Private Const ATHENA_MD_PLANN_VIEW = ""
+'   "CREATE VIEW IF NOT EXISTS PLANN AS  "
+'   "select date('now', 'localtime') AS F, '#D#' AS COD, 'DIARIO' AS DES, 'DIARIA' AS FREC, strftime ('%w', date('now', 'localtime')) AS 'CONDITION' "
+'   "UNION ALL select date('now', 'localtime', 'weekday 1'), '#L#', 'LOS LUNES', 'SEMANAL', strftime ('%W', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'weekday 2'), '#M#', 'LOS MARTES', 'SEMANAL', strftime ('%W', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'weekday 3'), '#X#', 'LOS MIERCOLES', 'SEMANAL', strftime ('%W', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'weekday 4'), '#J#', 'LOS JUEVES', 'SEMANAL', strftime ('%W', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'weekday 5'), '#V#', 'LOS VIERNES', 'SEMANAL', strftime ('%W', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', 'weekday 1'), '#MPL#', 'PRIMER LUNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select case WHEN date('now', 'localtime', 'start of month', '1 month', '-1 day') < date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 1') THEN date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 1', '-7 days') else date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 1') END, '#MUL#', 'ULTIMO VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', 'weekday 2'), '#MPM#', 'PRIMER MARTES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select case WHEN date('now', 'localtime', 'start of month', '1 month', '-1 day') < date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 2') THEN date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 2', '-7 days')  else date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 2') END, '#MUM#', 'ULTIMO MARTES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', 'weekday 3'), '#MPX#', 'PRIMER MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select case WHEN date('now', 'localtime', 'start of month', '1 month', '-1 day') < date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 3') THEN date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 3', '-7 days')  else date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 3') END, '#MUX#', 'ULTIMO MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', 'weekday 4'), '#MPJ#', 'PRIMER JUEVES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select case WHEN date('now', 'localtime', 'start of month', '1 month', '-1 day') < date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 4') THEN date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 4', '-7 days')  else date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 4') END, '#MUJ#', 'ULTIMO MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', 'weekday 5'), '#MPV#', 'PRIMER VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select case WHEN date('now', 'localtime', 'start of month', '1 month', '-1 day') < date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 5') THEN date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 5', '-7 days')  else date('now', 'localtime', 'start of month', '1 month', '-1 day', 'weekday 5') END, '#MUV#', 'ULTIMO VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '7 days', 'weekday 1'), '#W2L#', 'SEGUNDO LUNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '7 days', 'weekday 2'), '#W2M#', 'SEGUNDO MARTES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '7 days', 'weekday 3'), '#W2X#', 'SEGUNDO MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '7 days', 'weekday 4'), '#W2J#', 'SEGUNDO JUEVES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '7 days', 'weekday 5'), '#W2V#', 'SEGUNDO VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '14 days', 'weekday 1'), '#W3L#', 'TERCER LUNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '14 days', 'weekday 2'), '#W3M#', 'TERCER MARTES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '14 days', 'weekday 3'), '#W3X#', 'TERCER MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '14 days', 'weekday 4'), '#W3J#', 'TERCER JUEVES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '14 days', 'weekday 5'), '#W3V#', 'TERCER VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '21 days', 'weekday 1'), '#W4L#', 'CUARTO LUNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '21 days', 'weekday 2'), '#W4M#', 'CUARTO MARTES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '21 days', 'weekday 3'), '#W4X#', 'CUARTO MIERCOLES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '21 days', 'weekday 4'), '#W4J#', 'CUARTO JUEVES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select date('now', 'localtime', 'start of month', '21 days', 'weekday 5'), '#W4V#', 'CUARTO VIERNES DEL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select CASE WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 0 = 0 THEN date('now', 'localtime', 'start of month', '1 days')  WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 6 = 0 THEN date('now', 'localtime', 'start of month', '2 days')  else date('now', 'localtime', 'start of month') END , '#MD1#', 'PRIMER DIA HABIL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select CASE WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 0 = 0 THEN date('now', 'localtime', 'start of month', '2 days')  WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 6 = 0 THEN date('now', 'localtime', 'start of month', '3 days')  WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 5 = 0 THEN date('now', 'localtime', 'start of month', '3 days')  else date('now', 'localtime', 'start of month', '1 days') END , '#MD2#', 'SEGUNDO DIA HABIL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select CASE WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 0 = 0 THEN date('now', 'localtime', 'start of month', '3 days')  WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 6 = 0 THEN date('now', 'localtime', 'start of month', '4 days')  WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 5 = 0 THEN date('now', 'localtime', 'start of month', '4 days') WHEN strftime( '%w', date('now', 'localtime', 'start of month')) - 4 = 0 THEN date('now', 'localtime', 'start of month', '4 days') else date('now', 'localtime', 'start of month', '2 days') END , '#MD3#', 'TERCER DIA HABIL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select CASE WHEN strftime( '%w', date('now', 'localtime', 'start of month', '1 month', '-1 day')) - 0 = 0 THEN date('now', 'localtime', 'start of month', '1 month', '-3 day')  WHEN strftime( '%w', date('now', 'localtime', 'start of month', '1 month', '-1 day')) - 6 = 0 THEN date('now', 'localtime', 'start of month', '1 month', '-2 day')  else date('now', 'localtime', 'start of month', '1 month', '-1 day') END , '#MU1#', 'ULTIMO DIA HABIL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+'   "UNION ALL select CASE WHEN strftime( '%w', date('now', 'localtime', 'start of month', '1 month', '-2 day')) - 0 = 0 THEN date('now', 'localtime', 'start of month', '1 month', '-4 day')  WHEN strftime( '%w', date('now', 'localtime', 'start of month', '1 month', '-2 day')) - 6 = 0 THEN date('now', 'localtime', 'start of month', '1 month', '-3 day')  else date('now', 'localtime', 'start of month', '1 month', '-2 day') END , '#MU2#', 'PENULTIMO DIA HABIL MES', 'MENSUAL', strftime ('%m', date('now', 'localtime')) "
+
+Private Const ATHENA_AREA_DEPT_CATEGORY_FULL = "CREATE VIEW IF NOT EXISTS AREA_DEPT_CATEGORY_FULL AS " & _
+                                " SELECT * from CATEGORY " & _
+                                " INNER JOIN AREA_UNIT_CATEGORY " & _
+                                " ON CATEGORY.CAT_COD = AREA_UNIT_CATEGORY.CAT_COD " & _
+                                " INNER JOIN AREA_DEPT " & _
+                                " ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " & _
+                                " INNER JOIN MAILBOX " & _
+                                " ON MAILBOX.MAILBOX_COD = AREA_DEPT.MAILBOX_COD " & _
+                                " LEFT JOIN DUTY_PLANNED " & _
+                                " ON AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD = DUTY_PLANNED.AREA_DEPT_CAT_COD " & _
+                                " LEFT JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD"
+                                
+' REPORTING - SLA - ESTÁTICOS
+
+Private Const ATHENA_MD_SLA_ANEXO = "CREATE TABLE IF NOT EXISTS SLA_ANEXO ( ANEXO_COD TEXT, ANEXO_SUP TEXT, ANEXO_DESC TEXT, CONSTRAINT UNQ UNIQUE (ANEXO_COD, ANEXO_SUP));"
+Private Const ATHENA_MD_SLA_MODULO = "CREATE TABLE IF NOT EXISTS SLA_MODULO ( MODULO_COD TEXT, DESC_ES TEXT, DESC_EN TEXT, CONSTRAINT UNQ UNIQUE (MODULO_COD)); "
+Private Const ATHENA_MD_SLA_INDICE = "CREATE TABLE IF NOT EXISTS SLA_INDICE ( INDICE_COD TEXT, DESC_ES TEXT, DESC_EN TEXT, CONSTRAINT UNQ UNIQUE (INDICE_COD));"
+Private Const ATHENA_MD_SLA_OPCOMERCIAL = "CREATE TABLE IF NOT EXISTS SLA_OPCOMERCIAL ( OP_COMERCIAL TEXT, NOM_ANEXO TEXT, CONSTRAINT UNQ UNIQUE (OP_COMERCIAL));"
+Private Const ATHENA_MD_SLA_CLIENTE = "CREATE TABLE IF NOT EXISTS SLA_CLIENTE ( CLIENTE TEXT, SUB_CLIENTE TEXT, GEOGRAFIA TEXT, CONSTRAINT UNQ UNIQUE (CLIENTE, SUB_CLIENTE));"
+Private Const ATHENA_MD_SLA_METRICA = "CREATE TABLE IF NOT EXISTS SLA_METRICA ( METRICA_COD TEXT, METRICA_NOM TEXT, UMBRAL TEXT, FRECUENCIA TEXT, TIPO_KPI TEXT " & _
+                                        " , ANEXO_COD TEXT, MODULO_COD TEXT, INDICE_COD TEXT, CLIENTE TEXT, SUB_CLIENTE TEXT, OP_COMERCIAL TEXT " & _
+                                        " , CONSTRAINT UNQ_COMB UNIQUE (ANEXO_COD, MODULO_COD, INDICE_COD, CLIENTE, OP_COMERCIAL) " & _
+                                        " , CONSTRAINT UNQ UNIQUE (METRICA_COD) );"
+' Private Const ATHENA_MD_DUTY_CLIENT = "CREATE TABLE IF NOT EXISTS DUTY_CLIENT ( CLIENT_COD TEXT PRIMARY KEY, CLIENT TEXT, SEGMENT TEXT);"
+Private Const ATHENA_MD_DUTY_PROJECT = "CREATE TABLE IF NOT EXISTS DUTY_PROJECT ( PROJECT_COD TEXT, PROJECT TEXT);"
+
+' Sofia
+
+Private Const ATHENA_MD_DUTY_CLIENT = "CREATE TABLE IF NOT EXISTS DUTY_CLIENT ( CLIENT_COD INTEGER PRIMARY KEY, CLIENT_GRUPO_ECONOMICO TEXT, BUC INTEGER, BANQUERO_1 TEXT;" & _
+                                         " , BANQUERO_2 TEXT, RESPONSABLE_INTERVENTORIA TEXT, NIVEL_TRANSACCIONALIDAD_INTERVENTORIA TEXT, CLUSTER_HEAD TEXT, NUEVO_ORIGINADOR TEXT;" & _
+                                         " , EJECUTIVO_LIQUIDITY TEXT, EQUIPO_CLIENT_SECTORES TEXT, EJECUTIVO_CS_FEBRERO_2025 TEXT, EJECUTIVO_TOKENS_USUARIOS TEXT);" & _
+                                         " , DEMANDA_X_GE TEXT, SECTOR_HUGO TEXT, CLASIFICACION INTEGER, TARJETAS INTEGER, EXCEPCIONES text);"
+
+Private Const ATHENA_MD_CANAL = "CREATE TABLE IF NOT EXISTS CANAL ( CANAL_CODE INTEGER, UNIT TEXT);"
+
+' REPORTING - SLA - PARAMETRIZACION
+
+Private Const ATHENA_MD_SLA_AREA_DEPT_CAT = "CREATE TABLE IF NOT EXISTS SLA_AREA_DEPT_CAT ( AREA_DEPT_CAT_COD INTEGER, METRICA_COD TEXT, PORCENTAJE REAL DEFAULT 1.0);"
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' DATA MODEL - ATHENA - DATA
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+' Draft record before clasification
+Private Const ATHENA_MD_DATA_PRE_TASK = "CREATE TABLE IF NOT EXISTS PRE_TASK " & _
+                                "(EMAIL TEXT, CONVERSATION_ID TEXT, SUBJECT TEXT, MAIL_STAMP TEXT, " & _
+                                " CONSTRAINT UNQ UNIQUE (EMAIL, CONVERSATION_ID));"
+' Group of duties
+Private Const ATHENA_MD_DATA_REQUEST = "CREATE TABLE IF NOT EXISTS REQUEST " & _
+                                "(REQUEST_COD INTEGER PRIMARY KEY AUTOINCREMENT, DUTY_COD TEXT NOT NULL, CONVERSATION_ID TEXT NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (REQUEST_COD, CONVERSATION_ID));"
+
+' Request-unity once classified
+Private Const ATHENA_MD_DATA_TASK = "CREATE TABLE IF NOT EXISTS DUTY " & _
+                                "(DUTY_COD TEXT PRIMARY KEY, STATUS_COD INTEGER NOT NULL, TOKEN_ENTRY_ID TEXT NOT NULL, CAT_AREA_UNIT_COD INTEGER NOT NULL, ORIGIN_COD INTEGER NOT NULL, " & _
+                                " NAME TEXT NOT NULL, OWNER_COD INTEGER, PRIOR_COD INTEGER NOT NULL, LAST_EVENT_STAMP TEXT NOT NULL, " & _
+                                " PK TEXT, VOLUME TEXT, WHO TEXT, `WHEN` TEXT, CLIENT TEXT, " & _
+                                " CONSTRAINT UNQ UNIQUE (TOKEN_ENTRY_ID));"
+
+Private Const ATHENA_MD_DATA_TASK_VAR = "CREATE TABLE IF NOT EXISTS DUTY_VAR " & _
+                                "(DUTY_COD TEXT NOT NULL, INDEX_COD INTEGER NOT NULL, VALUE TEXT NOT NULL" & _
+                                ");"
+Private Const ATHENA_MD_DATA_DUTY_VAR_INDEX = "CREATE INDEX IF NOT EXISTS INDEX_DUTY_VAR ON DUTY_VAR " & _
+                                "(DUTY_COD ASC);"
+Private Const ATHENA_MD_DATA_DUTY_VAR_INDEX2 = "CREATE INDEX IF NOT EXISTS INDEX_DUTY_VAR_VAR ON DUTY_VAR " & _
+                                "(DUTY_COD ASC, INDEX_COD ASC, VALUE ASC);"
+
+Private Const ATHENA_MD_DATA_TASK_TAG = "CREATE TABLE IF NOT EXISTS DUTY_TAG " & _
+                                "(DUTY_COD TEXT NOT NULL, TAG_COD INTEGER NOT NULL, HINT TEXT NOT NULL " & _
+                                ");"
+Private Const ATHENA_MD_DATA_DUTY_TAG_INDEX = "CREATE INDEX IF NOT EXISTS INDEX_DUTY_TAG ON DUTY_TAG " & _
+                                "(DUTY_COD ASC);"
+Private Const ATHENA_MD_DATA_DUTY_TAG_INDEX2 = "CREATE INDEX IF NOT EXISTS INDEX_DUTY_TAG_TAG ON DUTY_TAG " & _
+                                "(DUTY_COD ASC, TAG_COD ASC);"
+
+Private Const ATHENA_MD_DATA_TASK_NOTE = "CREATE TABLE IF NOT EXISTS DUTY_NOTE " & _
+                                "(DUTY_COD TEXT NOT NULL, NOTE TEXT NOT NULL, WHO_ID TEX NOT NULL, NOTE_STAMP TEXT NOT NULL " & _
+                                ");"
+Private Const ATHENA_MD_DATA_DUTY_NOTE_INDEX = "CREATE INDEX IF NOT EXISTS INDEX_DUTY_NOTE ON DUTY_NOTE " & _
+                                "(DUTY_COD ASC);"
+
+Private Const ATHENA_MD_DATA_TASK_ADJ = "CREATE TABLE IF NOT EXISTS DUTY_ADJ " & _
+                                "(DUTY_COD TEXT NOT NULL, ADJ TEXT NOT NULL, ORIGIN TEXT NOT NULL, WHO_ID TEXT NOT NULL, NOTE_STAMP TEXT NOT NULL, " & _
+                                " CONSTRAINT UNQ UNIQUE (DUTY_COD, ADJ, ORIGIN));"
+
+Private Const ATHENA_MD_DATA_TASK_EVENT = "CREATE TABLE IF NOT EXISTS DUTY_EVENT " & _
+                                "(ENTRY_ID TEXT NOT NULL, DUTY_COD TEXT NOT NULL, EVENT_COD INTEGER NOT NULL, EVENT_STAMP, WHO_ID TEXT NOT NULL, VALUE TEXT NOT NULL, IS_ADJ TEXT, IGNORE TEXT, WHEN_STAMP TEXT " & _
+                                " );"
+                                '" ,CONSTRAINT UNQ UNIQUE (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP));"
+
+
+Private Const ATHENA_MD_DATA_TASK_TIME_REPORT = "" _
+                & " CREATE VIEW IF NOT EXISTS DUTY_TIME_REPORT AS " _
+                & " SELECT DUTY_COD, A AS FIRST_MAIL_T, B AS FIRST_TOKEN_T, MIN(C,D,E) AS FIRST_DUTY_T, MIN (D,E) AS FIRST_ASSIGN_T, E AS FIRST_INIT_T " _
+                & " , CASE WHEN MIN (F, G) = '1999-01-01 00:00:00' THEN '' ELSE MIN(F,G) END AS FIRST_END_T, CASE WHEN MAX (F, G) = '9999-01-01 00:00:00' THEN '' ELSE MAX(F,G) END AS LAST_END_T " _
+                & " , SUBSTR(REPLACE(MIN( A, B, C, D, E), '-',''),1,8) AS 'MARK_DAY' " _
+                & " , CASE WHEN SUBSTR(REPLACE(MIN(A, B, C, D, E), '-',''),1,8) = REPLACE(DATE('NOW','localtime'),'-','') THEN 'Hoy' Else 'Ant' END AS MARK_D " _
+                & " FROM ( SELECT DUTY_COD, MIN(MAIL_T) AS A, MIN(TOKEN_T) AS B, MIN(DUTY_T) AS C, MIN(ASSIGN_T) AS D, MIN(INIT_T) AS E, MAX(END_T) AS F, MIN(END_T2) AS G " _
+                & " FROM( SELECT DUTY_EVENT.DUTY_COD " _
+                & " , CASE WHEN EVENT_COD = 0 AND (VALUE = 'MAIL') THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS MAIL_T " _
+                & " , CASE WHEN EVENT_COD = 0 AND (VALUE = 'TOKEN') THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS TOKEN_T " _
+                & " , CASE WHEN EVENT_COD = 0 AND (VALUE = 'DUTY') THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS DUTY_T " _
+                & " , CASE WHEN EVENT_COD = 2 AND (VALUE <> '-1') THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS ASSIGN_T " _
+                & " , CASE WHEN EVENT_COD = 1 AND (VALUE = 2  OR VALUE = 3 OR VALUE = 4 OR VALUE = 6) THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS INIT_T " _
+                & " , CASE WHEN EVENT_COD * 1 = 1 AND (VALUE * 1 = 4 OR VALUE * 1 = 6) THEN DATETIME(EVENT_STAMP) ELSE '1999-01-01 00:00:00' END AS END_T " _
+                & " , CASE WHEN EVENT_COD * 1 = 1 AND (VALUE * 1 = 4 OR VALUE * 1 = 6) THEN DATETIME(EVENT_STAMP) ELSE '9999-01-01 00:00:00' END AS END_T2 " _
+                & " FROM DUTY_EVENT WHERE EVENT_COD IN ('0','1','2') AND (IGNORE IS NULL OR IGNORE = '')) B GROUP BY DUTY_COD)" _
+                & " UNION ALL " _
+                & " SELECT DUTY.DUTY_COD, '9999-01-01 00:00:00', '9999-01-01 00:00:00', DUTY.LAST_EVENT_STAMP, CASE WHEN DUTY.STATUS_COD = 5 THEN '9999-01-01 00:00:00' ELSE DUTY.LAST_EVENT_STAMP END, DUTY.LAST_EVENT_STAMP, CASE WHEN DUTY.STATUS_COD in (4,6) THEN DUTY.LAST_EVENT_STAMP ELSE '9999-01-01 00:00:00' END, CASE WHEN DUTY.STATUS_COD in (4,6) THEN DUTY.LAST_EVENT_STAMP ELSE '9999-01-01 00:00:00' END " _
+                & " , SUBSTR(REPLACE(DUTY.LAST_EVENT_STAMP, '-',''),1,8), CASE WHEN SUBSTR(REPLACE(DUTY.LAST_EVENT_STAMP, '-',''),1,8) = REPLACE(DATE('NOW','localtime'),'-','') THEN 'Hoy' Else 'Ant' END FROM DUTY LEFT JOIN DUTY_EVENT ON DUTY.DUTY_COD = DUTY_EVENT.DUTY_COD WHERE DUTY_EVENT.DUTY_COD IS NULL " _
+                & " ORDER BY 1;"
+
+Private Const ATHENA_MD_DATA_TASK_TIME_TRACE = "" _
+                & " CREATE TABLE IF NOT EXISTS DUTY_TEMP_TIME_TRACE (COD INTEGER PRIMARY KEY AUTOINCREMENT, DUTY_COD TEXT, START_STOP INTEGER,EVENT_STAMP TEXT,WHO_ID Text,IS_ADJ Text);"
+
+Private Const ATHENA_MD_DATA_REPORT_DUTY = "" _
+            & "CREATE VIEW IF NOT EXISTS REPORT_DUTY AS " _
+            & " SELECT AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD, AREA_DEPT.AREA, AREA_DEPT.DEPT, MAILBOX.EMAIL, UNIT.UNIT, UNIT.COUNTRY, DUTY_STATUS.STATUS_TAG, CATEGORY.CAT, DUTY.NAME, DUTY.DUTY_COD, DUTY_ORIGIN.ORIGIN, USER.USER_EMPLOYEE, DUTY_PRIORITY.PRIORITY, DUTY_TIME_REPORT.FIRST_MAIL_T, DUTY_TIME_REPORT.FIRST_TOKEN_T, DUTY_TIME_REPORT.FIRST_DUTY_T, DUTY_TIME_REPORT.FIRST_ASSIGN_T, DUTY_TIME_REPORT.FIRST_INIT_T, DUTY_TIME_REPORT.FIRST_END_T, DUTY_TIME_REPORT.LAST_END_T, DUTY_TIME_REPORT.MARK_DAY, DUTY_TIME_REPORT.MARK_D," _
+                    & " SUM( DUTY_TIME_TRACE.TIME_TRACE_MINUTES) AS T, SUM( CASE WHEN IS_ADJ = '1' THEN DUTY_TIME_TRACE.TIME_TRACE_MINUTES ELSE 0.0 END ) AS T_ADJ " _
+            & " FROM DUTY LEFT JOIN DUTY_TIME_REPORT ON DUTY.DUTY_COD = DUTY_TIME_REPORT.DUTY_COD " _
+            & " INNER JOIN DUTY_STATUS ON DUTY.STATUS_COD = DUTY_STATUS.STATUS_COD " _
+            & " LEFT JOIN AREA_UNIT_CATEGORY ON DUTY.CAT_AREA_UNIT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " _
+            & " LEFT JOIN AREA_DEPT ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+            & " LEFT JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " _
+            & " LEFT JOIN CATEGORY ON AREA_UNIT_CATEGORY.CAT_COD = CATEGORY.CAT_COD " _
+            & " LEFT JOIN DUTY_TIME_TRACE ON DUTY.DUTY_COD = DUTY_TIME_TRACE.DUTY_COD " _
+            & " LEFT JOIN DUTY_ORIGIN ON DUTY.ORIGIN_COD = DUTY_ORIGIN.ORIGIN_COD " _
+            & " LEFT JOIN DUTY_PRIORITY ON DUTY.PRIOR_COD = DUTY_PRIORITY.PRIORITY_COD " _
+            & " LEFT JOIN USER ON DUTY.OWNER_COD = USER.USER_COD " _
+            & " LEFT JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+            & " GROUP BY AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD, AREA_DEPT.AREA, AREA_DEPT.DEPT, MAILBOX.EMAIL, UNIT.UNIT, UNIT.COUNTRY, DUTY_STATUS.STATUS_TAG, CATEGORY.CAT, DUTY.NAME, DUTY.DUTY_COD, DUTY_ORIGIN.ORIGIN, USER.USER_EMPLOYEE, DUTY_PRIORITY.PRIORITY, DUTY_TIME_REPORT.FIRST_MAIL_T, DUTY_TIME_REPORT.FIRST_TOKEN_T, DUTY_TIME_REPORT.FIRST_DUTY_T, DUTY_TIME_REPORT.FIRST_ASSIGN_T, DUTY_TIME_REPORT.FIRST_INIT_T, DUTY_TIME_REPORT.FIRST_END_T, DUTY_TIME_REPORT.LAST_END_T, DUTY_TIME_REPORT.MARK_DAY, DUTY_TIME_REPORT.MARK_D "
+
+Private Const ATHENA_MD_DATA_REPORT_DUTY_TRACE = "" _
+            & "CREATE VIEW IF NOT EXISTS REPORT_DUTY_TRACE AS " _
+            & " SELECT REPORT_DUTY.* " _
+            & " , DUTY_TIME_TRACE.START_T AS EVENT_START " _
+            & " , DUTY_TIME_TRACE.STOP_T AS EVENT_STOP " _
+            & " , DUTY_TIME_TRACE.TIME_TRACE_MINUTES as EVENT_MINUTES " _
+            & " , DUTY_TIME_TRACE.MARK_WHO as EVENT_WHO " _
+            & " , DUTY_TIME_TRACE.IS_ADJ as ADJUSTMENT " _
+            & " , DUTY_TIME_TRACE.MARK_MONTH as EVENT_MARK_MONTH " _
+            & " , DUTY_TIME_TRACE.MARK_DAY as EVENT_MARK_DAY " _
+            & " FROM REPORT_DUTY, DUTY_TIME_TRACE " _
+            & " WHERE REPORT_DUTY.duty_cod = DUTY_TIME_TRACE.duty_cod " _
+            & " AND DUTY_TIME_TRACE.DICT like 'OK%' " _
+            & " ORDER BY REPORT_DUTY.DUTY_COD, DUTY_TIME_TRACE.START_T;"
+
+' "DROP VIEW IF EXISTS DUTY_TIME_TRACE;" & vbNewLine
+
+Private Const ATHENA_MD_DATA_TASK_TIME_TRACE_VIEW = "" & _
+                        " CREATE VIEW IF NOT EXISTS DUTY_TIME_TRACE AS " & vbNewLine & _
+                        " SELECT A1.DUTY_COD,A1.EVENT_STAMP AS START_T, CASE WHEN ((A2.DUTY_COD IS NULL AND A1.START_STOP = 0) OR (A1.DUTY_COD <> A2.DUTY_COD AND A1.START_STOP = 0)) THEN strftime(DATETIME('now', 'localtime')) ELSE A2.EVENT_STAMP END AS STOP_T, " & vbNewLine & _
+                        " CASE WHEN (A1.DUTY_COD = A2.DUTY_COD AND A1.START_STOP = 0 AND A2.START_STOP = 1) THEN 'OK_END' " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD = A2.DUTY_COD AND A1.START_STOP = A2.START_STOP) THEN 'REV' " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD = A2.DUTY_COD AND A1.START_STOP = 1 AND A2.START_STOP = 0) THEN 'N/A Pause-Continue' " & vbNewLine & _
+                        " WHEN (A2.DUTY_COD IS NULL AND A1.START_STOP = 0) THEN 'OK_RUNNING' " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD <> A2.DUTY_COD AND A1.START_STOP = 0) THEN 'OK_RUNNING' " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD <> A2.DUTY_COD AND A1.START_STOP = 1) THEN 'N/A Next Duty' " & vbNewLine & _
+                        " ELSE 'IGNORE' END AS DICT, " & vbNewLine & vbNewLine & _
+                        " CASE WHEN (A1.DUTY_COD = A2.DUTY_COD AND A1.START_STOP = 0 AND A2.START_STOP = 1) THEN (strftime('%s',A2.EVENT_STAMP) - strftime('%s',A1.EVENT_STAMP))/60.0 " & vbNewLine & _
+                        " WHEN (A2.DUTY_COD IS NULL AND A1.START_STOP = 0) THEN (strftime('%s',strftime(datetime('now', 'localtime'))) - strftime('%s',A1.EVENT_STAMP))/60.0 " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD <> A2.DUTY_COD AND A1.START_STOP = 0) THEN (strftime('%s',strftime(datetime('now', 'localtime'))) - strftime('%s',A1.EVENT_STAMP))/60.0 " & vbNewLine & _
+                        " WHEN (A1.DUTY_COD <> A2.DUTY_COD AND A1.START_STOP = 1) THEN 0 " & vbNewLine & _
+                        " ELSE 0 END AS TIME_TRACE_MINUTES " & vbNewLine & vbNewLine & _
+                        " , A1.WHO_ID as 'MARK_WHO', A1.IS_ADJ, REPLACE(DATE(A1.EVENT_STAMP,'start of month'), '-', '') as 'MARK_MONTH', REPLACE(DATE(A1.EVENT_STAMP), '-', '') as 'MARK_DAY'" & vbNewLine & _
+                        " FROM DUTY_TEMP_TIME_TRACE A1 LEFT JOIN DUTY_TEMP_TIME_TRACE A2 ON A1.COD = (A2.COD - 1);"
+
+Private Const ATHENA_MD_DATA_DUMMY_EVENT_NEW_DUTY_ = " CREATE TABLE IF NOT EXISTS DUMMY_EVENT_NEW_DUTY " & _
+                                                    " (EVENT_CODE INTEGER NOT NULL, VALUE TEXT, " & _
+                                                    " CONSTRAINT UNQ UNIQUE (EVENT_CODE, VALUE));"
+
+Private Const ATHENA_MD_DATA_TASK_TIME_TRACE_INS = " INSERT INTO DUTY_TEMP_TIME_TRACE (DUTY_COD, START_STOP, EVENT_STAMP, WHO_ID, IS_ADJ) " _
+                                                & " SELECT DUTY_EVENT.DUTY_COD, CASE WHEN DUTY_EVENT.VALUE = '2' THEN '0' ELSE '1' END as START_STOP, DUTY_EVENT.EVENT_STAMP, DUTY_EVENT.WHO_ID, DUTY_EVENT.IS_ADJ " _
+                                                & " FROM DUTY_EVENT WHERE DUTY_EVENT.EVENT_COD == '1' AND (DUTY_EVENT.VALUE IN ('2','3','4','5','6')) AND (DUTY_EVENT.IGNORE IS NULL OR DUTY_EVENT.IGNORE = '') " _
+                                                & " UNION ALL SELECT DUTY.DUTY_COD, '0', DUTY.LAST_EVENT_STAMP, 'RECOVERY', '1' FROM DUTY LEFT JOIN DUTY_EVENT ON DUTY.DUTY_COD = DUTY_EVENT.DUTY_COD WHERE DUTY_EVENT.DUTY_COD IS NULL " _
+                                                & " UNION ALL SELECT DUTY.DUTY_COD, '1', DUTY.LAST_EVENT_STAMP, 'RECOVERY', '1' FROM DUTY LEFT JOIN DUTY_EVENT ON DUTY.DUTY_COD = DUTY_EVENT.DUTY_COD WHERE DUTY_EVENT.DUTY_COD IS NULL AND DUTY.STATUS_COD IN ('3','4','5','6') " _
+                                                & " ORDER BY 1, 3, 2;"
+    
+Public Function launchReporting(mailbox As String, ddbb_dest As String, Optional owner As String = "", Optional calcViews As Boolean = True) As String
+    'MERGE CAT AND DATA
+    Call DB_MERGE(DDBB_Athena_local_file_path & DDBB_Athena_file, ddbb_dest, verbose)
+    
+    '--CLEAR
+    If owner <> "" Then
+        ' Clear not mine
+        Call DB_DML(ddbb_dest, "DELETE FROM DUTY_EVENT WHERE DUTY_EVENT.EVENT_COD = '1' AND DUTY_EVENT.VALUE IN ('5')", verbose)
+        Call DB_DML(ddbb_dest, "DELETE FROM DUTY_EVENT WHERE DUTY_EVENT.EVENT_COD = '1' AND DUTY_EVENT.VALUE IN ('2') AND DUTY_EVENT.WHO_ID <> '" & owner & "'", verbose)
+        Call DB_DML(ddbb_dest, "DELETE FROM DUTY WHERE DUTY_COD NOT IN (SELECT DUTY_COD FROM DUTY_EVENT WHERE DUTY_EVENT.WHO_ID = '" & owner & "' AND DUTY_EVENT.EVENT_COD = '1' GROUP BY DUTY_COD) OR DUTY_COD IS NULL ", verbose)
+        Call DB_DML(ddbb_dest, "DELETE FROM DUTY_EVENT WHERE DUTY_COD NOT IN (SELECT DUTY_COD FROM DUTY GROUP BY DUTY.DUTY_COD)", verbose)
+    End If
+    
+    '--DATA ... CLEAR REPORTING STRUCTURE
+    Call DB_DDL(ddbb_dest, "DROP VIEW IF EXISTS DUTY_TIME_REPORT", verbose) ' DUTY_TIME_REPORT
+    Call DB_DDL(ddbb_dest, "DROP TABLE IF EXISTS DUTY_TEMP_TIME_TRACE", verbose)    ' DUTY_TEMP_TIME_TRACE
+    Call DB_DDL(ddbb_dest, "DROP VIEW IF EXISTS DUTY_TIME_TRACE", verbose)  ' DUTY_TIME_TRACE
+    Call DB_DDL(ddbb_dest, "DROP VIEW IF EXISTS REPORT_DUTY", verbose)      ' REPORT_DUTY
+    Call DB_DDL(ddbb_dest, "DROP VIEW IF EXISTS REPORT_DUTY_TRACE", verbose) ' REPORT_DUTY_TRACE
+    Call DB_DDL(ddbb_dest, "UPDATE duty_event set ENTRY_ID=''", verbose) ' Clear entry_id
+    Call DB_DDL(ddbb_dest, "UPDATE duty set TOKEN_ENTRY_ID=''", verbose) ' Clear entry_id
+    
+    If calcViews And owner <> "" Then
+        '--DATA ... REPORTING STRUCTURE
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_TASK_TIME_REPORT, verbose) ' DUTY_TIME_REPORT
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_TASK_TIME_TRACE, verbose)                 ' DUTY_TEMP_TIME_TRACE
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_TASK_TIME_TRACE_VIEW, verbose)    ' DUTY_TIME_TRACE
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_REPORT_DUTY, verbose)             ' REPORT_DUTY
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_REPORT_DUTY_TRACE, verbose)       ' REPORT_DUTY_TRACE
+    
+        '--RECALC TIME_TRACE
+        Call DB_DDL(ddbb_dest, ATHENA_MD_DATA_TASK_TIME_TRACE_INS, verbose)
+    End If
+    
+    '--GENERATE REPORT
+    If owner <> "" Then
+        msg = calc_reporting_myself(ddbb_dest, owner)
+    Else
+        'msg = calc_reporting_full(ddbb_dest, mailbox)
+    End If
+
+    launchReporting = msg
+End Function
+
+Private Function calc_reporting_full(ddbb_dest As String, Optional mailbox As String = "") As String
+    Dim Sql As String
+    Sql = "SELECT REPORT_DUTY.AREA, REPORT_DUTY.DEPT, REPORT_DUTY.MARK_D, REPORT_DUTY.STATUS_TAG, " _
+        & " sum(CASE WHEN REPORT_DUTY.MARK_D = 'Ant' and REPORT_DUTY.STATUS_TAG = '#Finalizada' and DATE(REPORT_DUTY.FIRST_END_T) = DATE('Now', 'localtime') THEN 1 " _
+        & " WHEN REPORT_DUTY.MARK_D = 'Ant' and REPORT_DUTY.STATUS_TAG = '#Finalizada' and DATE(REPORT_DUTY.FIRST_END_T) <> DATE('Now', 'localtime') THEN 0 ELSE 1 END) AS N " _
+        & " From REPORT_DUTY "
+    
+    If mailbox <> "" Then Sql = Sql & " WHERE REPORT_DUTY.EMAIL = '" & mailbox & "' "
+    
+    Sql = Sql & " GROUP BY REPORT_DUTY.AREA, REPORT_DUTY.DEPT, REPORT_DUTY.MARK_D, REPORT_DUTY.STATUS_TAG ORDER BY 1, 2, 3, 4"
+
+    Dim reports As Variant: reports = DB_DQL(ddbb_dest, Sql, verbose)
+    Dim i As Long
+    Dim team As String
+    Dim when As String
+    Dim msg As String
+    If VariantSize(reports) > 0 Then
+        For i = 0 To UBound(reports)
+            If Not IsEmpty(reports(i)) Then
+                If team <> reports(i)(0) & " " & reports(i)(1) Then
+                    team = reports(i)(0) & " " & reports(i)(1)
+                    msg = msg & team & vbNewLine
+                    when = reports(i)(2)
+                    msg = msg & vbTab & when & vbNewLine
+                    msg = msg & vbTab & vbTab & reports(i)(3) & ".." & vbTab & reports(i)(4) & vbNewLine
+                ElseIf when <> reports(i)(2) Then
+                    when = reports(i)(2)
+                    msg = msg & vbTab & when & vbNewLine
+                    msg = msg & vbTab & vbTab & reports(i)(3) & ".." & vbTab & reports(i)(4) & vbNewLine
+                Else
+                    msg = msg & vbTab & vbTab & reports(i)(3) & ".." & vbTab & reports(i)(4) & vbNewLine
+                End If
+            End If
+        Next
+    End If
+    calc_reporting_full = msg
+End Function
+
+Public Function calc_reporting_myself(ddbb_dest As String, who As String) As String
+    Dim msg As String: msg = ""
+    Dim msg_t As String: msg_t = " ------ No ha habido actividad registrada para hoy --------"
+    Dim msg_n As String: msg_n = Format("Equipo................", "@@@@@@@@@@@@@@@@@@@@@@@@") & vbTab & " \ " & "Fin Hoy" & " \ " & "En Inicio!" & " \ " & "En pausa" & vbNewLine & "------------------------------------------------------------------------------"
+    Dim alertaAbiertas As Boolean
+    Dim Sql As String: Sql = "SELECT * FROM (" _
+        & " SELECT 'A' AS Q, " _
+        & " REPORT_DUTY_TRACE.EVENT_WHO `(A) Yo / (B) En Equipo` " _
+        & " , SUM( CASE WHEN REPORT_DUTY_TRACE.EVENT_MARK_DAY = STRFTIME('%Y%m%d', Date('now','localtime')) THEN REPORT_DUTY_TRACE.EVENT_MINUTES * 1 ELSE 0 END) AS `(A) T_HOY / (B) FIN_HOY` " _
+        & " , SUM( CASE WHEN REPORT_DUTY_TRACE.EVENT_MARK_MONTH = STRFTIME('%Y%m01', Date('now','localtime')) THEN REPORT_DUTY_TRACE.EVENT_MINUTES * 1 ELSE 0 END) AS `(A) T_MES / (B) INICIADAS` " _
+        & " , SUM( CASE WHEN STRFTIME('%w', Date('now','localtime')) - 1 = 0 AND REPORT_DUTY_TRACE.EVENT_MARK_DAY = STRFTIME('%Y%m%d', Date('now','localtime', '-3 days')) THEN REPORT_DUTY_TRACE.EVENT_MINUTES * 1 " _
+            & " WHEN STRFTIME('%w', Date('now','localtime')) - 1 <> 0 AND REPORT_DUTY_TRACE.EVENT_MARK_DAY = STRFTIME('%Y%m%d', Date('now','localtime', '-1 days')) THEN REPORT_DUTY_TRACE.EVENT_MINUTES * 1 ELSE 0 END) AS `(A) - / (B) PAUSADAS` " _
+        & " FROM REPORT_DUTY_TRACE WHERE REPORT_DUTY_TRACE.EVENT_WHO = '" & who & "' " _
+        & " GROUP BY REPORT_DUTY_TRACE.EVENT_WHO " _
+        & " UNION ALL " _
+        & " SELECT 'B' AS Q, " _
+        & " COALESCE(REPORT_DUTY.AREA, '?') || ' - ' || COALESCE(REPORT_DUTY.DEPT, '?') AS DONDE " _
+        & " , SUM( CASE WHEN REPORT_DUTY.STATUS_TAG = '" & Athena_Mail_Status_End & "' AND REPORT_DUTY.MARK_D = STRFTIME('%Y%m%d', Date('now','localtime')) THEN 1 ELSE 0 END) AS N_FIN_HOY " _
+        & " , SUM( CASE WHEN REPORT_DUTY.STATUS_TAG = '" & Athena_Mail_Status_Started & "' THEN 1 ELSE 0 END) AS N_INICIADA " _
+        & " , SUM( CASE WHEN REPORT_DUTY.STATUS_TAG = '" & Athena_Mail_Status_Stopped & "' THEN 1 ELSE 0 END) AS N_PAUSADA " _
+        & " FROM REPORT_DUTY WHERE REPORT_DUTY.USER_EMPLOYEE = '" & who & "' " _
+        & " GROUP BY COALESCE(REPORT_DUTY.AREA, '?') || ' - ' || COALESCE(REPORT_DUTY.DEPT, '?') " _
+        & " ) AS TABLA WHERE TABLA.`Q` = 'A' or ( TABLA.`Q` = 'B' AND (TABLA.`(A) T_HOY / (B) FIN_HOY` > 0 OR TABLA.`(A) T_MES / (B) INICIADAS` > 0 OR TABLA.`(A) - / (B) PAUSADAS` > 0))"
+
+    Dim reports As Variant: reports = DB_DQL(ddbb_dest, Sql, verbose)
+    Dim i As Long
+    If VariantSize(reports) > 0 Then
+        For i = 0 To UBound(reports)
+            If reports(i)(0) = "A" Then msg_t = "Tiempo Hoy: " & reports(i)(2) & " minuto(s)" & vbNewLine & "Tiempo Ayer: " & reports(i)(4) & " minuto(s)" & vbNewLine & "Tiempo Mes: " & reports(i)(3) & " minuto(s)"
+            If reports(i)(0) = "B" Then msg_n = msg_n & vbNewLine & Format(reports(i)(1), "@@@@@@@@@@@@@@@@@@@@@@@@") & vbTab & "(" & reports(i)(2) & ")" & vbTab & "(" & reports(i)(3) & ")" & vbTab & "(" & reports(i)(4) & ")"
+            If reports(i)(0) = "B" And reports(i)(3) <> "0" Then alertaAbiertas = True
+        Next
+    End If
+    
+    msg = msg_t & vbNewLine & vbNewLine & msg_n
+    If alertaAbiertas Then msg = msg & vbNewLine & vbNewLine & "!!!!!ATENCIÓN TIENE TAREAS ABIERTAS!!!!!"
+    calc_reporting_myself = msg
+End Function

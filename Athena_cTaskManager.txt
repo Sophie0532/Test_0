@@ -1,0 +1,471 @@
+
+Public GLOBAL_CLIENT As String
+
+
+'''Macro Regla auto-lanzamiento planificadas
+Public Sub ejecutaPlanificadas(mailItem As Outlook.mailItem)
+    Debug.Print "Inicio planis....& vbTab & Time"
+    Dim markT As Single: markT = time
+    botonPlanificadas
+    Debug.Print "Lanzado planis....& vbTab & Time - markT & vbTab & Time"
+    Traza lgINFO, "Lanzando planis...." & vbTab & time - markT & vbTab & time, "ejecutaPlanificadas"
+End Sub
+
+'''Proceso que borra un borrador sin clasificar
+Public Sub Athena_delete_draft_mail(mailItem As Outlook.mailItem)
+On Error GoTo ErrHndlr:
+    Dim doIns As Long
+    doIns = Athena_cSqlite.DB_DML(DDBB_Athena_file_path & DDBB_Athena_file_data, "DELETE FROM PRE_TASK WHERE CONVERSATION_ID ='" & mailItem.ConversationID & "';")
+ErrHndlr:
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Sub
+
+'''Función que busca el borrador asociado a una conversación
+Public Function Get_Draft_From_Email(mailItem As Outlook.mailItem) As Outlook.mailItem
+On Error GoTo ErrHndlr:
+    ' Get drafFolder from mailbox
+        'JJTODO Tras quitar la comprobación y entrar siempre, revisar que no hay casos de error
+    'If mailItem Is Nothing Then ''JJ Revisar con Sergio. Si es un mail tb tiene que rescatar su borrador
+        Dim draftFolder As Outlook.MAPIFolder
+        'Set draftFolder = Get_Draft_Folder(mailItem.Parent) ''' Now drafts will be at Inbox folder 2023-06-15
+        Set draftFolder = Get_Inbox_Folder(mailItem.Parent)
+        
+        ' Look for draft for a given email
+        'Set Get_Draft_From_Email = Get_Any_Draft(mailItem.ConversationTopic, mailItem, draftFolder)
+        'Set Get_Any_Draft = Get_Email_By_Param_At_Folder("ConversationTopic", conversation, draftFolder, True)
+        Set Get_Draft_From_Email = Get_Email_By_Param_At_Folder("ConversationTopic", mailItem.ConversationTopic, draftFolder, True)
+ErrHndlr:
+    Set draftFolder = Nothing
+    If Err Then
+        MsgBox Err.Number & " " & Err.Description
+        Set Get_Draft_From_Email = Nothing
+    End If
+End Function
+
+Public Sub Athena_edit_token(ByRef token As Outlook.mailItem, campos() As String)
+    Dim status As String: status = Athena_Token_get_Status(token)
+    
+    'Actualiza el json del token
+    Athena_Token_edit_json token, campos
+    
+    ' **NEW** Actualiza bbdd si Nuevo Enfoque // Finalizado o Descartado
+    If lowLatency And _
+        (status = Athena_Mail_Status_Discarted Or status = Athena_Mail_Status_End) Then
+                If Not Athena_Token_push(token) Then MsgBox "No se ha actualizado la info en BBDD, será necesario sincronizar posteriormente la información de la tarea"
+    End If
+End Sub
+
+Public Sub Athena_Set_Launched_Planned_Tasks(t_stamp As String)
+    Dim i As Long
+    Dim token As Outlook.mailItem
+    'READ duty IDs          (0) DUTY_COD, (1) TOKEN_ENTRY_ID, (2) CAT_AREA_UNIT_COD, (3) ORIGIN_COD, (4) NAME, (5) OWNER_COD
+    'Anterior al cambio de origin
+    'Dim entryIDs As Variant: entryIDs = DB_DQL(DDBB_Athena_file_path & DDBB_Athena_file_data, ATHENA_GET_PLANNED_DUTY_IDS(Athena_Token_origin_Planned_Cod, Athena_Mail_StatusCod_UnAssigned, t_stamp), verbose)
+    Dim entryIDs As Variant: entryIDs = DB_DQL(DDBB_Athena_file_path & DDBB_Athena_file_data, ATHENA_GET_PLANNED_DUTY_IDS(Athena_Mail_StatusCod_UnAssigned, t_stamp), verbose)
+    If Not IsEmpty(entryIDs) Then
+        For i = 0 To UBound(entryIDs)
+            If Not IsEmpty(entryIDs(i)) Then
+                Set token = Outlook.Application.GetNamespace("MAPI").GetItemFromID(entryIDs(i)(1))
+                Athena_Token_set_IdDuty token, "" & entryIDs(i)(0)
+            End If
+        Next
+    End If
+    Set token = Nothing
+End Sub
+
+Public Function Athena_Reserve_Launched_Planned_Tasks(release As Boolean) As Boolean
+    ' As AREA_DEPT_CAT_COD are unic, its just to append all existing one from all db files
+    'Look for existing db files from given mailbox
+    Dim dbOrigins As Variant: dbOrigins = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_DBS_FROM_MAILBOX("" & getMailBox()), verbose)
+    If Not IsEmpty(dbOrigins) And VariantSize(dbOrigins) > 0 Then
+        If release Then
+            Athena_Reserve_Launched_Planned_Tasks = DB_DML(DDBB_Athena_file_path & dbOrigins(0)(0), "DELETE FROM DUTY_PLANNED_EXECUTED WHERE `AREA_DEPT_CAT_COD` = -1 AND `DESC` = '' AND MARK_DAY = DATE('now', 'localtime')", verbose) > 0
+        Else
+            Athena_Reserve_Launched_Planned_Tasks = DB_DML(DDBB_Athena_file_path & dbOrigins(0)(0), "INSERT INTO DUTY_PLANNED_EXECUTED (`AREA_DEPT_CAT_COD`, `DESC`, MARK_DAY) VALUES (-1, '', DATE('now', 'localtime'))", verbose) > 0
+        End If
+    End If
+End Function
+
+Public Function Athena_Get_Launched_Planned_Tasks(dir_buzon As String) As String
+    ' Get Already planned tasks generated ( (0) AREA_DEPT_CAT_COD + '.' + DESC )
+    Dim i As Long
+    Dim j As Long
+    Dim launchedTasks As String: launchedTasks = "''"
+    ' As AREA_DEPT_CAT_COD are unic, its just to append all existing one from all db files
+    'Look for existing db files from given mailbox
+    Dim dbOrigins As Variant: dbOrigins = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_DBS_FROM_MAILBOX(dir_buzon), verbose)
+    If Not IsEmpty(dbOrigins) And VariantSize(dbOrigins) > 0 Then
+        For j = 0 To UBound(dbOrigins)
+            ' Look for already launched planned task for each Db file
+            Dim alreadyIDs As Variant: alreadyIDs = DB_DQL(DDBB_Athena_file_path & dbOrigins(j)(0), ATHENA_GET_PLANNED_EXECUTED(), verbose)
+            If Not IsEmpty(alreadyIDs) And VariantSize(alreadyIDs) > 0 Then
+                 For i = 0 To UBound(alreadyIDs)
+                    ' Filter already generated Planned tasks
+                    If Not IsEmpty(alreadyIDs(i)) Then launchedTasks = launchedTasks & ",'" & alreadyIDs(i)(0) & "'"
+                 Next
+            End If
+        Next
+    End If
+    
+    Athena_Get_Launched_Planned_Tasks = launchedTasks
+End Function
+
+'''
+'
+'
+Public Function Athena_drop_token(mailItem As Outlook.mailItem) As Long
+'''''TODO
+    Athena_drop_token = 0
+    'mailItem.
+End Function
+
+Private Function Get_Any_Draft(ByVal conversation, ByVal mailItem As Outlook.mailItem, ByVal draftFolder As Outlook.MAPIFolder) As Outlook.mailItem
+    Set Get_Any_Draft = Get_Email_By_Param_At_Folder("ConversationTopic", conversation, draftFolder, True)
+End Function
+
+Private Function Do_Clear_Msg_Email(ByVal mailHtml) As String
+    Dim msgHtml As String
+    ' Clear break line
+    msgHtml = Replace(Replace(mailHtml, Chr(10), " "), Chr(13), " ")
+    ' Clear double white spaces
+    While InStr(1, msgHtml, "  ") > 0
+        msgHtml = Replace(msgHtml, "  ", " ")
+    Wend
+    ' Get last email text
+    If InStr(1, msgHtml, "De: ") > 0 Then msgHtml = Left(msgHtml, InStr(1, msgHtml, "De: ") - 2)
+    If InStr(1, msgHtml, "From: ") > 0 Then msgHtml = Left(msgHtml, InStr(1, msgHtml, "From: ") - 2)
+    
+    Do_Clear_Msg_Email = msgHtml
+End Function
+
+Public Sub Athena_Update_State(ByRef token As Outlook.mailItem, status As String, Optional num_employee As String)
+    'Comprobamos si cambia el owner
+    'Si quien el user que continua es diferente al owner de la tarea, actualiza owner
+    'Generar evento de reasignación
+    'Actualizar owner del duty
+    Dim NewOwner As String
+    Dim owner As String: owner = Athena_Token_get_EmployeeOwner(token)
+    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
+    
+    If num_employee <> "" Then
+        NewOwner = num_employee
+    ElseIf (owner <> getUserLogin And status <> Athena_Mail_Status_Stopped) Then
+        owner = getUserLogin
+        NewOwner = owner
+    Else
+        NewOwner = "" ' No cambia
+    End If
+    
+    'Actualiza Token
+    If NewOwner = "" Then
+        Athena_Token_Update_State token, status, getStatusCod(status), owner, t
+    Else
+        Athena_Token_Update_State token, status, getStatusCod(status), NewOwner, t
+    End If
+    
+    ' New Method 3.0 >> Everything stored at local db
+    If Not Athena_Token_push(token) Then MsgBox "No se ha actualizado la info en BBDD, será necesario sincronizar posteriormente la información de la tarea"
+End Sub
+
+'estadoInicio
+'Función que indica el estado en el que arranca un borrador según la selección del formulario
+Public Function estadoInicio(campos() As String) As String
+On Error GoTo ErrHndlr:
+    Dim status As String: status = -1
+    ' Reassigned
+    If CBool(campos(CAMPO_REASSIGNED)) Then
+        ' To no one >> #Sin Asignar
+        If campos(CAMPO_USER_COD) = Athena_Mail_OwnerCod_UnAssigned Then
+            status = Athena_Mail_Status_UnAssigned
+        Else
+        ' Other >> #En Pausa
+            status = Athena_Mail_Status_Stopped
+        End If
+    Else
+        ' Postponed >> #En Pausa
+        If CBool(campos(CAMPO_POSTPONED)) Then
+            status = Athena_Mail_Status_Stopped
+        Else
+            ' Time Adjustment >> #Finalizada
+            If CBool(campos(CAMPO_TIME_ADJUST)) Then
+                status = Athena_Mail_Status_End
+            Else
+            ' Other >> #Iniciada
+                status = Athena_Mail_Status_Started
+            End If
+        End If
+    End If
+ErrHndlr:
+    estadoInicio = status
+End Function
+
+
+'cambiaEstado
+Private Sub cambiaEstado(ByRef token As Outlook.mailItem, new_status As String, Optional quiet As Boolean, Optional num_employee As String)
+    Dim prev_status As String: prev_status = Athena_Token_get_Status(token)
+    
+    If (Athena_isTokenType(token)) Then
+        Dim isReassig As Boolean: isReassig = (num_employee <> "")
+        If (esTransicionValida(prev_status, new_status, isReassig)) Then
+            Call Athena_Update_State(token, new_status, num_employee)
+        Else
+            If Not quiet Then MsgBox "No se puede pasar de " & prev_status & " a " & new_status
+        End If
+    Else
+        MsgBox "No se puede " & new_status & " si no es un correo de control"
+    End If
+End Sub
+
+'esTransicionValida
+'Función que comprueba si válida la transición del estado actual al estado nuevo
+Private Function esTransicionValida(prev_state As String, new_state As String, Optional isReassigned As Boolean) As Boolean
+    Dim result As Boolean
+    result = False
+    Select Case new_state
+    Case Athena_Mail_Status_Discarted
+        result = (prev_state = Athena_Mail_Status_UnAssigned Or prev_state = Athena_Mail_Status_NoClassify Or prev_state = Athena_Mail_Status_Started Or prev_state = Athena_Mail_Status_Stopped)
+    Case Athena_Mail_Status_End        'Se pueden finalizar sólo iniciadas y en pausa
+        result = (prev_state = Athena_Mail_Status_Started Or prev_state = Athena_Mail_Status_Stopped)
+    Case Athena_Mail_Status_Stopped
+        result = (prev_state = Athena_Mail_Status_Started) _
+                  Or (isReassigned And (prev_state = Athena_Mail_Status_UnAssigned Or prev_state = Athena_Mail_Status_Stopped Or prev_state = Athena_Mail_Status_End))   'Solicitud de reasignación
+    Case Athena_Mail_Status_Started
+        result = (prev_state = Athena_Mail_Status_NoClassify Or prev_state = Athena_Mail_Status_UnAssigned Or prev_state = Athena_Mail_Status_Stopped Or prev_state = Athena_Mail_Status_End Or prev_state = Athena_Mail_Status_Discarted)
+    Case Athena_Mail_Status_UnAssigned
+        result = (prev_state = Athena_Mail_Status_NoClassify) _
+                          Or (isReassigned And prev_state = Athena_Mail_Status_Stopped)   'Solicitud de reasignación
+    Case Athena_Mail_Status_NoClassify
+        result = False
+    Case Else
+        result = False
+    End Select
+    esTransicionValida = result
+End Function
+
+
+'Dado un literal de estado, devuelve su código
+Public Function getOriginCod(origin As String) As Integer
+    Dim result As Integer
+    Select Case origin    ' Evaluate Number.
+        Case Athena_Token_origin_Cliente, Athena_Token_origin_Cliente_Cod
+            result = Athena_Token_origin_Cliente_Cod
+        Case Athena_Token_origin_BO, Athena_Token_origin_BO_Cod
+            result = Athena_Token_origin_BO_Cod
+        Case Athena_Token_origin_FO, Athena_Token_origin_FO_Cod
+            result = Athena_Token_origin_FO_Cod
+        Case Athena_Token_origin_IG, Athena_Token_origin_IG_Cod
+            result = Athena_Token_origin_IG_Cod
+        Case Athena_Token_origin_GTB, Athena_Token_origin_GTB_Cod
+            result = Athena_Token_origin_GTB_Cod
+        Case Athena_Token_origin_IT, Athena_Token_origin_IT_Cod
+            result = Athena_Token_origin_IT_Cod
+    End Select
+    getOriginCod = result
+End Function
+
+'Dado un literal de estado, devuelve su código
+Public Function getStatusCod(status As String) As Integer
+    Dim result As Integer
+    Select Case status    ' Evaluate Number.
+        Case Athena_Mail_Status_NoClassify
+            result = Athena_Mail_StatusCod_NoClassify
+        Case Athena_Mail_Status_End
+            result = Athena_Mail_StatusCod_End
+        Case Athena_Mail_Status_NoClassify
+            result = Athena_Mail_StatusCod_NoClassify
+        Case Athena_Mail_Status_NoStart
+            result = Athena_Mail_StatusCod_NoStart
+        Case Athena_Mail_Status_Started
+            result = Athena_Mail_StatusCod_Started
+        Case Athena_Mail_Status_Stopped
+            result = Athena_Mail_StatusCod_Stopped
+        Case Athena_Mail_Status_UnAssigned
+            result = Athena_Mail_StatusCod_UnAssigned
+        Case Athena_Mail_Status_Discarted
+            result = Athena_Mail_StatusCod_Discarted
+    End Select
+    getStatusCod = result
+End Function
+
+Public Function getPriorityCod(priority As String) As Integer
+    Select Case priority
+        Case Athena_Mail_Priority_Critical, Athena_Mail_PriorityCod_Critical
+            getPriorityCod = Athena_Mail_PriorityCod_Critical
+        Case Athena_Mail_Priority_High, Athena_Mail_PriorityCod_High
+            getPriorityCod = Athena_Mail_PriorityCod_High
+        Case Athena_Mail_Priority_Low, Athena_Mail_PriorityCod_Low
+            getPriorityCod = Athena_Mail_PriorityCod_Low
+        Case Athena_Mail_Priority_Cliente, Athena_Mail_PriorityCod_Normal
+            getPriorityCod = Athena_Mail_PriorityCod_Normal
+        Case Else
+            getPriorityCod = -1
+    End Select
+End Function
+
+Public Function getUserCod(num_employee As String) As Integer
+    Dim res As Integer: res = -1
+    Dim query As String: query = ATHENA_GET_QUERY_GET_USERCOD_BY_NUM_EMPLOYEE(num_employee)
+    Dim result() As Variant: result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    If Not IsEmpty(result(0)) Then
+        res = result(0)(0)
+    End If
+    getUserCod = res
+End Function
+
+'Public Function getClientCod(client As String) As Integer
+'    Dim res As Integer: res = -1
+'    Dim query As String
+'    Dim result() As Variant
+'    query = ATHENA_GET_QUERY_GET_CLIENTCOD_BY_CLIENT(client)
+'    result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+'    If Not IsEmpty(result(0)) Then
+'        res = result(0)(0)
+'    End If
+'    getClientCod = res
+'End Function
+
+
+
+Public Function getUserName(num_employee As String) As String
+    Dim res As Variant
+    Dim query As String
+    Dim result() As Variant
+    res = Athena_Mail_Owner_UnAssigned
+    query = ATHENA_GET_QUERY_GET_USERNAME_BY_NUM_EMPLOYEE(num_employee)
+    result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    If Not IsEmpty(result(0)) Then
+        res = result(0)(0)
+    End If
+    getUserName = res
+End Function
+
+Public Function getUserEmployee(user_cod As String) As String
+    Dim res As Variant
+    Dim query As String
+    Dim result() As Variant
+    res = -1
+    query = ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD(user_cod)
+    result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    If Not IsEmpty(result(0)) Then
+        res = result(0)(0)
+    End If
+    getUserEmployee = res
+End Function
+
+
+'botonIniciar
+
+Public Sub ejecutaEscenarioInicio(SelectedMail As Outlook.mailItem)
+    botonAdvancedFreeze
+    'Athena_cTaskManager.Athena_FreezeAllStartedDuties
+    
+    Dim campos() As String
+    Dim miTask As New TaskManagerForm
+
+    miTask.GLOBAL_MAILBOX = getMailBox()
+    ' No se seleccionó nada
+    If SelectedMail Is Nothing Then
+        '''''''''Set miTask.token = Athena_cTaskManager.Athena_new_token(Nothing)
+        Set miTask.oMail = Nothing
+        miTask.GLOBAL_TITLE_ORIGINAL = "Nueva Tarea"
+        miTask.GLOBAL_MAIL_STAMP = "" ' Sin mail ==> no hay marca de tiempo
+    'Se ha seleccionado un mail normal
+    ElseIf (Not Athena_isTokenType(SelectedMail)) Then
+        Set miTask.oMail = SelectedMail
+        ' Look for an existing draft by classifying mail (Token)
+        Set miTask.token = Get_Draft_From_Email(SelectedMail)
+        If miTask.token Is Nothing Then ' No exists >> New Token from .Reply
+            Set miTask.token = Athena_Token_Init(SelectedMail, campos, Athena_Mail_Status_Classifying, -1)
+        Else ' Exists but its already classified so >> New Token from .Reply
+            If miTask.token.CC <> Athena_Mail_Status_NoClassify Then
+                Set miTask.token = Athena_Token_Init(SelectedMail, campos, Athena_Mail_Status_Classifying, -1)
+            End If
+        End If
+        
+        miTask.GLOBAL_TITLE_ORIGINAL = SelectedMail.Subject
+        miTask.GLOBAL_MAIL_STAMP = Format(SelectedMail.ReceivedTime, Athena_FullTime_Pattern)
+    'Se ha seleccionado un token
+    Else
+        Set miTask.token = SelectedMail
+        Set miTask.oMail = Nothing
+        miTask.GLOBAL_TITLE_ORIGINAL = SelectedMail.Subject
+        miTask.GLOBAL_MAIL_STAMP = SelectedMail.CreationTime
+        Call Athena_Token_set_Status(miTask.token, Athena_Mail_Status_Classifying)
+    End If
+
+    miTask.Show
+End Sub
+
+Public Sub ejecutaClonado(ByRef token As Outlook.mailItem)
+    botonAdvancedFreeze
+    'Athena_cTaskManager.Athena_FreezeAllStartedDuties
+'TODO
+End Sub
+
+'ejecutaEscenarioContinuaForzado
+Public Sub ejecutaEscenarioContinuaForzado(ByRef token As Outlook.mailItem)
+    botonAdvancedFreeze
+    
+    Dim inboxFolder As Outlook.Folder: Set inboxFolder = Get_Inbox_Folder(Outlook.Application.ActiveExplorer.currentFolder)
+    
+    ' Owner de la tarea a reabrir Vs Yo
+    Dim owner As String: owner = Athena_Token_get_EmployeeOwner(token)
+    Dim yo As String: yo = getUserLogin
+    If yo <> owner Then
+        Select Case MsgBox("¿Quiere reabrirle la tarea finalizada por " + Athena_Token_get_Owner(token) + " ?" + vbNewLine + vbNewLine + vbTab + "Sí --> Reabrir " + vbNewLine + vbTab + "No --> Reabrir y reasignarme a 'mi'" + vbNewLine + vbTab + "Cancel --> No Reabrir", vbYesNoCancel, "Reapertura")
+        Case vbYes
+            ' Reapertura al anterior propietario
+            Athena_Token_set_comments token, "Reabierto"
+            cambiaEstado token, Athena_Mail_Status_Stopped, True, owner
+            Set token = doMoveToken(token, inboxFolder)
+        Case vbNo
+            ' Reapertura pero me la asigno
+            cambiaEstado token, Athena_Mail_Status_Started, True, yo
+            'Set token = token.Move(inboxFolder)
+            Set token = doMoveToken(token, inboxFolder)
+        Case Else
+            ' Cancelar ==> No hacer nada
+        End Select
+    Else
+        If MsgBox("¿Quieres reabrir tu tarea finalizada?" + vbNewLine + vbNewLine + vbTab + "Ok/Aceptar --> Reabrir " + vbNewLine + vbTab + "Cancel --> No Reabrir", vbOKCancel, "Reapertura") = vbOK Then
+            cambiaEstado token, Athena_Mail_Status_Started
+            Set token = doMoveToken(token, inboxFolder)
+        End If
+    End If
+    Set inboxFolder = Nothing
+End Sub
+
+'ejecutaEscenarioContinua
+Public Sub ejecutaEscenarioContinua(ByRef token As Outlook.mailItem)
+    botonAdvancedFreeze
+    'Athena_cTaskManager.Athena_FreezeAllStartedDuties
+    
+    cambiaEstado token, Athena_Mail_Status_Started
+End Sub
+
+'ejecutaEscenarioReasignacion
+Public Sub ejecutaEscenarioReasignar(ByRef token As Outlook.mailItem, num_employee As String)
+    If num_employee = Athena_Mail_Owner_UnAssigned Then
+        cambiaEstado token, Athena_Mail_Status_UnAssigned, , Athena_Mail_Owner_UnAssigned
+    Else
+        cambiaEstado token, Athena_Mail_Status_Stopped, , num_employee
+    End If
+End Sub
+
+'ejecutaEscenarioPausa
+Public Sub ejecutaEscenarioPausa(ByRef token As Outlook.mailItem, Optional quiet As Boolean)
+    cambiaEstado token, Athena_Mail_Status_Stopped, quiet
+End Sub
+
+
+'ejecutaEscenarioDescarte
+Public Sub ejecutaEscenarioDescarte(ByRef token As Outlook.mailItem)
+    cambiaEstado token, Athena_Mail_Status_Discarted
+End Sub
+
+
+'ejecutaEscenarioFinaliza
+Public Sub ejecutaEscenarioFinaliza(ByRef token As Outlook.mailItem)
+    cambiaEstado token, Athena_Mail_Status_End
+End Sub
+

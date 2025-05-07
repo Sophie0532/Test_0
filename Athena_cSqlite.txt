@@ -1,0 +1,608 @@
+
+#If VBA7 Then ' Excel 2010 or later
+    Public Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal Milliseconds As LongPtr)
+#Else ' Excel 2007 or earlier
+    Public Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal Milliseconds As Long)
+#End If
+
+Private Sub DB_Init()
+    Dim InitReturn As Long
+    #If Win64 Then
+        ' I put the 64-bit version of SQLite.dll under a subdirectory called x64
+        InitReturn = SQLite3Initialize(RutaLibAthena + "x64")
+    #Else
+        InitReturn = SQLite3Initialize ' Default path is ThisWorkbook.Path but can specify other path where the .dlls reside.
+    #End If
+    If InitReturn <> SQLITE_INIT_OK Then
+        Debug.Print "Error Initializing SQLite. Error: " & Err.LastDllError
+        MsgBox "Error Initializing SQLite. Error: " & Err.LastDllError, vbCritical, "Inténtelo de nuevo"
+        Exit Sub
+    End If
+    
+End Sub
+
+#If Win64 Then
+Private Function DB_Open(ByVal data_base As String, ByRef myDbHandle As LongPtr) As Long
+#Else
+Private Function DB_Open(ByVal data_base As String, ByRef myDbHandle As Long) As Long
+#End If
+    'open connection
+    'test conection
+    DB_Open = SQLite3Open(data_base, myDbHandle)
+End Function
+
+Public Function DB_DQL(data_base As String, Sql As String, Optional ByVal verbose As Boolean = False) As Variant
+On Error GoTo ErrHandle
+
+    Dim colCount As Long
+    Dim i As Long
+    Dim RetVal As Long
+    Dim rowValues() As String
+    Dim allRows() As Variant
+    ReDim allRows(0 To 0) As Variant
+    
+    Dim rowCount As Long
+    ' Define
+    rowCount = 0
+    
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    #End If
+    
+    DB_Init
+    If verbose Then Debug.Print Now, " - Inicio DQL. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(data_base, myDbHandle)
+    
+    RetVal = SQLite3PrepareV2(myDbHandle, Sql, myStmtHandle)
+    If RetVal <> 0 Then
+        MsgBox "Error opening database: " & RetVal
+        Call Traza(lgFATAL, "No executed. DB err code: " & RetVal, "DB_DQL")
+        Exit Function
+    End If
+    
+    colCount = SQLite3ColumnCount(myStmtHandle)
+    ReDim rowValues(0 To colCount - 1) As String
+    
+    ' Execute the SQL statement and read the rows
+    RetVal = SQLite3Step(myStmtHandle)
+    While RetVal = 100 ' SQLITE_ROW
+        
+        For i = 0 To colCount - 1
+            rowValues(i) = SQLite3ColumnText(myStmtHandle, i)
+        Next i
+        
+        allRows(UBound(allRows)) = rowValues
+        ReDim Preserve allRows(0 To UBound(allRows) + 1)
+        
+        allRows(rowCount) = rowValues
+        rowCount = rowCount + 1
+        
+        RetVal = SQLite3Step(myStmtHandle)
+    Wend
+    
+    If UBound(allRows) <> 0 Then ReDim Preserve allRows(0 To UBound(allRows) - 1)    ' Remove last empty element
+        
+ErrHandle:
+    'Call Call Traza(lgINFO, "[SQL DB_DQL] " & sql, "DB_DQL")
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_DQL")
+    
+    ' Finalize (delete) the statement
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    If verbose Then Debug.Print Now, " [SQL DQL] - ", Sql
+    If verbose Then Debug.Print Now, " [Rows] - " & rowCount & ", [Cols] - " & colCount
+    If verbose Then Debug.Print Now, " - fin DQL." & "..." & Format(Now(), "hh:mm:ss")
+    
+    ' Return the result array
+    DB_DQL = allRows
+End Function
+
+#If Win64 Then
+Private Function DB_DML_N(ByVal data_base As String, ByRef queries() As String, Optional ByVal verbose As Boolean = False) As Long
+#Else
+Private Function DB_DML_N(ByVal data_base As String, ByRef queries() As String, Optional ByVal verbose As Boolean = False) As Long
+#End If
+On Error GoTo ErrHandle
+    Dim RetVal As Long
+    Dim Sql As String
+    Dim i As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim totalChanges As Long
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim totalChanges As Long
+    #End If
+    
+    DB_Init
+    
+    If verbose Then Debug.Print Now, " - Inicio DML. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(data_base, myDbHandle)
+    totalChanges = 0
+    For i = 0 To UBound(queries)
+        Sql = queries(i)
+        If Trim(Sql) <> "" Then
+            ' Define
+            RetVal = SQLite3PrepareV2(myDbHandle, Sql, myStmtHandle) 'prueba con est?ticos
+            ' Start running the statement
+            RetVal = SQLite3Step(myStmtHandle)
+            
+            ' Gestión de colisión ==> SQLITE_DONE (OK) // SQL_BUSY (RETRY?)
+            Dim retry As Integer
+            retry = 0
+            While retry < 10 And RetVal = SQLITE_BUSY
+                Sleep 1000
+                RetVal = SQLite3Step(myStmtHandle)
+                retry = retry + 1
+            Wend
+            
+            ' Finalize (delete) the statement
+            If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+            
+            Select Case RetVal
+            Case SQLITE_MISUSE
+                totalChanges = -1
+                If GetFileSize(data_base) > 0 Then
+                    Call Traza(lgFATAL, "No executed due Misuse. : " & Sql, "DB_DML_N")
+                    MsgBox "No executed due Misuse. DB err code: " & RetVal, vbCritical, "Inténtelo de nuevo"
+                Else
+                    Call Traza(lgFATAL, "No executed due there is no db file (" & GetFileNameFromPath(data_base) & "). : " & Sql, "DB_DML_N")
+                    MsgBox "No executed due there is no db file (" & GetFileNameFromPath(data_base) & ").", vbCritical, "DB File incorrecto"
+                End If
+                
+            Case SQLITE_BUSY
+                Call Traza(lgFATAL, "No executed due Busy DDBB. : " & Sql, "DB_DML_N")
+                MsgBox "No executed due Busy DDBB. DB err code: " & RetVal, vbCritical, "Inténtelo de nuevo"
+                totalChanges = -1
+            Case SQLITE_DONE
+                totalChanges = totalChanges + Sqlite3.SQLite3Changes(myDbHandle)
+            End Select
+            
+            If verbose Then Debug.Print Now, " [SQL DML_2] - ", Sql
+        End If
+    Next
+    'If RetVal = SQLITE_DONE Then
+    '    If verbose Then Debug.Print "SQLite3Step Done"
+    'Else
+    '    If verbose Then Debug.Print "SQLite3Step returned " & RetVal
+    '    Call Traza(lgFATAL, "No executed next query. DB err code: " & RetVal, "DB_DML_N")
+    'End If
+    
+ErrHandle:
+    
+    ' Finalize (delete) the statement
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    SQLite3Free
+
+    If Err Then Call Traza(lgFATAL, " At " & i & " query. " & Err.Number & " " & Err.Description, "DB_DML_N")
+
+    If verbose Then Debug.Print Now, " [Changes] - " & totalChanges
+    If verbose Then Debug.Print Now, " - fin DML." & "..." & Format(Now(), "hh:mm:ss")
+    DB_DML_N = totalChanges
+End Function
+
+#If Win64 Then
+Private Function DB_DML_1(ByVal data_base As String, ByVal Sql As String, Optional ByVal verbose As Boolean = False) As Long
+#Else
+Private Function DB_DML_1(ByVal data_base As String, ByVal Sql As String, Optional ByVal verbose As Boolean = False) As Long
+#End If
+On Error GoTo ErrHandle
+    Dim RetVal As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim totalChanges As Long
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim totalChanges As Long
+    #End If
+    
+    DB_Init
+    
+    If verbose Then Debug.Print Now, " - Inicio DML. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(data_base, myDbHandle)
+    
+    ' Define
+    RetVal = SQLite3PrepareV2(myDbHandle, Sql, myStmtHandle) 'prueba con est?ticos
+    ' Start running the statement
+    RetVal = SQLite3Step(myStmtHandle)
+    
+    ' Gestión de colisión ==> SQLITE_DONE (OK) // SQL_BUSY (RETRY?)
+    Dim retry As Integer
+    retry = 0
+    While retry < 10 And RetVal = SQLITE_BUSY
+        Sleep 1000
+        RetVal = SQLite3Step(myStmtHandle)
+        retry = retry + 1
+    Wend
+    Select Case RetVal
+    Case SQLITE_MISUSE
+        totalChanges = -1
+        If GetFileSize(data_base) > 0 Then
+            Call Traza(lgFATAL, "No executed due Misuse. : " & Sql, "DB_DML_N")
+            MsgBox "No executed due Misuse. DB err code: " & RetVal, vbCritical, "Inténtelo de nuevo"
+        Else
+            Call Traza(lgFATAL, "No executed due there is no db file (" & GetFileNameFromPath(data_base) & "). : " & Sql, "DB_DML_N")
+            MsgBox "No executed due there is no db file (" & GetFileNameFromPath(data_base) & ").", vbCritical, "DB File incorrecto"
+        End If
+    Case SQLITE_BUSY
+        Call Traza(lgFATAL, "No executed due Busy DDBB. : " & Sql, "DB_DML_N")
+        MsgBox "No executed due Busy DDBB. DB err code: " & RetVal, vbCritical, "Inténtelo de nuevo"
+        totalChanges = -1
+    Case SQLITE_DONE
+        If verbose Then Debug.Print "SQLite3Step Done"
+        totalChanges = totalChanges + Sqlite3.SQLite3Changes(myDbHandle)
+    Case Else
+        If verbose Then Debug.Print "SQLite3Step returned " & RetVal
+        Call Traza(lgFATAL, "No executed next query. DB err code: " & RetVal, "DB_DML_1")
+    End Select
+
+ErrHandle:
+    ' Finalize (delete) the statement
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    SQLite3Free
+    
+    Call Traza(lgINFO, "[SQL DB_DML_1] " & Sql, "DB_DML_1")
+    
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_DML_1")
+    
+    If verbose Then Debug.Print Now, " [SQL DML] - ", Sql
+    If verbose Then Debug.Print Now, " [Changes] - " & totalChanges
+    If verbose Then Debug.Print Now, " - fin DML." & "..." & Format(Now(), "hh:mm:ss")
+    DB_DML_1 = totalChanges
+End Function
+
+Public Function DB_DML(ByVal data_base As String, ByVal Sql As String, Optional ByVal verbose As Boolean = False) As Long
+On Error GoTo ErrHandle
+    Dim totalChanges As Long
+    If Len(Sql) > Len(Replace(Sql, ";", "")) Then
+        Dim queries() As String
+        queries = Split(Sql, ";")
+        totalChanges = DB_DML_N(data_base, queries, verbose)
+    Else
+        totalChanges = DB_DML_1(data_base, Sql, verbose)
+    End If
+ErrHandle:
+    Call Traza(lgINFO, "[SQL DB_DML] " & Sql, "DB_DML")
+    If Err Then
+        Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_DML")
+        Err.Raise Err.Number, Err.Source, Err.Description
+    End If
+    DB_DML = totalChanges
+End Function
+
+#If Win64 Then
+Public Function DB_DDL(ByVal data_base As String, ByVal Sql As String, Optional ByVal verbose As Boolean = False) As LongPtr
+#Else
+Public Function DB_DDL(ByVal data_base As String, ByVal Sql As String, Optional ByVal verbose As Boolean = False) As Long
+#End If
+On Error GoTo ErrHandle
+    Dim RetVal As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim totalChanges As LongPtr
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim totalChanges As Long
+    #End If
+    
+    DB_Init
+    
+    If verbose Then Debug.Print Now, " - Inicio DML. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(data_base, myDbHandle)
+    
+    ' Define
+    RetVal = SQLite3PrepareV2(myDbHandle, Sql, myStmtHandle) 'prueba con est?ticos
+      
+    ' Start running the statement
+    RetVal = SQLite3Step(myStmtHandle)
+    
+    If RetVal = SQLITE_DONE Then
+        If verbose Then Debug.Print "SQLite3Step Done"
+        totalChanges = 0
+    Else
+        If verbose Then Debug.Print "SQLite3Step returned " & RetVal
+        totalChanges = -1
+        Call Traza(lgFATAL, "No executed next query. DB err code: " & RetVal, "DB_DDL")
+        MsgBox "No executed next query. DB err code: " & RetVal, vbCritical, "Inténtelo de nuevo"
+    End If
+    
+ErrHandle:
+     ' Finalize (delete) the statement
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    Call Traza(lgINFO, "[SQL DB_DDL] " & Sql, "DB_DDL")
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_DDL")
+    
+    If verbose Then Debug.Print Now, " [SQL DDL] - ", Sql
+    If verbose Then Debug.Print Now, " [OK?] - " & (totalChanges >= 0)
+    If verbose Then Debug.Print Now, " - fin DDL." & "..." & Format(Now(), "hh:mm:ss")
+    DB_DDL = totalChanges
+End Function
+
+Public Sub DB_HIST_30(ByVal db_hist As String, ByVal db_data As String, Optional ByVal verbose As Boolean = False)
+    Dim RetVal As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim myStmtHandleAttach As LongPtr
+    Dim totalChanges As LongPtr
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim myStmtHandleAttach As Long
+    Dim totalChanges As Long
+    #End If
+    ' DB_HIST
+    Dim i As Long
+    ' Reads all tables from data_base
+    Dim tableIDs As Variant
+    tableIDs = DB_DQL(db_data, "SELECT name FROM sqlite_master WHERE type='table' and name <> 'sqlite_sequence'", verbose)
+    
+    DB_Init
+    
+    If verbose Then Debug.Print Now, " - Inicio DB_HIST. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(db_hist, myDbHandle)
+    
+    ' Define
+    RetVal = SQLite3PrepareV2(myDbHandle, "ATTACH '" & db_data & "' AS db1", myStmtHandleAttach)  'prueba con est?ticos
+      
+    ' Start running the statement
+    RetVal = SQLite3Step(myStmtHandleAttach)
+    
+    If RetVal = SQLITE_DONE Then
+        If Not IsEmpty(tableIDs) Then
+            For i = 0 To UBound(tableIDs)
+                If Not IsEmpty(tableIDs(i)) Then
+                    Dim table As String
+                    table = tableIDs(i)(0)
+                    
+                    If verbose Then Debug.Print "converging table:...." & table
+                    
+                    ' Define
+                    RetVal = SQLite3PrepareV2(myDbHandle, "INSERT OR REPLACE INTO " & table & " SELECT * FROM db1." & table & ";", myStmtHandle)
+                      
+                    ' Start running the statement
+                    RetVal = SQLite3Step(myStmtHandle)
+                    If RetVal = SQLITE_DONE Then totalChanges = 0
+                    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+                End If
+            Next
+        End If
+        If verbose Then Debug.Print "SQLite3Step Done"
+        totalChanges = 0
+    Else
+        If verbose Then Debug.Print "SQLite3Step returned " & RetVal
+        totalChanges = -1
+    End If
+    
+ErrHandle:
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_HIST")
+    
+    ' Finalize (delete) the statement
+    If myStmtHandleAttach > 0 Then SQLite3Finalize (myStmtHandleAttach)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    SQLite3Free
+    
+    If verbose Then Debug.Print Now, " [OK?] - " & (totalChanges >= 0)
+    If verbose Then Debug.Print Now, " - fin DDL." & "..." & Format(Now(), "hh:mm:ss")
+    
+End Sub
+
+Public Sub DB_MERGE(ByVal data_base As String, ByVal data_base_data As String, Optional ByVal verbose As Boolean = False)
+    Dim RetVal As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim myStmtHandleAttach As LongPtr
+    Dim totalChanges As LongPtr
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim myStmtHandleAttach As Long
+    Dim totalChanges As Long
+    #End If
+    
+    Dim i As Long
+    ' Reads all tables from data_base
+    Dim tableIDs As Variant
+    tableIDs = DB_DQL(data_base, "SELECT name FROM sqlite_master WHERE type='table' and name <> 'sqlite_sequence'", verbose)
+    ' Reads all views from data_base
+    Dim viewIDs As Variant
+    viewIDs = DB_DQL(data_base, "SELECT name, sql FROM sqlite_master WHERE type='view'", verbose)
+    
+    DB_Init
+    
+    If verbose Then Debug.Print Now, " - Inicio DB_MERGE. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+    
+    RetVal = DB_Open(data_base_data, myDbHandle)
+    
+    ' Define
+    RetVal = SQLite3PrepareV2(myDbHandle, "ATTACH '" & data_base & "' AS db1", myStmtHandleAttach) 'prueba con est?ticos
+      
+    ' Start running the statement
+    RetVal = SQLite3Step(myStmtHandleAttach)
+    
+    If RetVal = SQLITE_DONE Then
+        If Not IsEmpty(tableIDs) Then
+            For i = 0 To UBound(tableIDs)
+                If Not IsEmpty(tableIDs(i)) Then
+                    Dim table As String
+                    table = tableIDs(i)(0)
+                    
+                    If verbose Then Debug.Print "migrating table:...." & table
+                    
+                    ' Define
+                    RetVal = SQLite3PrepareV2(myDbHandle, "CREATE TABLE IF NOT EXISTS " & table & " AS SELECT * FROM db1." & table & ";", myStmtHandle)
+                      
+                    ' Start running the statement
+                    RetVal = SQLite3Step(myStmtHandle)
+                    If RetVal = SQLITE_DONE Then totalChanges = 0
+                    ' Finish
+                    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+                End If
+            Next
+        End If
+        
+        If Not IsEmpty(viewIDs) Then
+            For i = 0 To UBound(viewIDs)
+                If Not IsEmpty(viewIDs(i)) Then
+                    Dim view As String
+                    view = viewIDs(i)(1)
+                    
+                    If verbose Then Debug.Print "migrating view:...." & viewIDs(i)(0)
+                    
+                    ' Define
+                    RetVal = SQLite3PrepareV2(myDbHandle, view, myStmtHandle)
+                      
+                    ' Start running the statement
+                    RetVal = SQLite3Step(myStmtHandle)
+                    If RetVal = SQLITE_DONE Then totalChanges = 0
+                    ' Finish
+                    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+                End If
+            Next
+        End If
+    
+        If verbose Then Debug.Print "SQLite3Step Done"
+        totalChanges = 0
+    Else
+        If verbose Then Debug.Print "SQLite3Step returned " & RetVal
+        totalChanges = -1
+    End If
+    
+    RetVal = SQLite3PrepareV2(myDbHandle, "DETACH DATABASE db1;", myStmtHandle)
+    RetVal = SQLite3Step(myStmtHandle)
+    ' Finish
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+ErrHandle:
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_MERGE")
+    
+    ' Finalize (delete) the statement
+    If myStmtHandleAttach > 0 Then SQLite3Finalize (myStmtHandleAttach)
+
+    'cierre connection
+    If myDbHandle > 0 Then SQLite3Close (myDbHandle)
+    
+    SQLite3Free
+    
+    If verbose Then Debug.Print Now, " [OK?] - " & (totalChanges >= 0)
+    If verbose Then Debug.Print Now, " - fin DDL." & "..." & Format(Now(), "hh:mm:ss")
+End Sub
+
+Public Sub DB_UNIFY(ByVal data_base_origin As String, ByVal data_base_dest As String, ByVal isFirst As Boolean, ByVal bbddID As String, Optional ByVal verbose As Boolean = False)
+    Dim RetVal As Long
+    #If Win64 Then
+    Dim myDbHandle As LongPtr
+    Dim myStmtHandle As LongPtr
+    Dim myStmtHandleAttach As LongPtr
+    Dim totalChanges As LongPtr
+    #Else
+    Dim myDbHandle As Long
+    Dim myStmtHandle As Long
+    Dim myStmtHandleAttach As Long
+    Dim totalChanges As Long
+    #End If
+
+    Dim i As Long
+    Dim sql_duty As String
+    Dim sql_duty_event As String
+    Dim sql_duty_matrix As String
+    Dim sql_duty_var As String
+    
+    If isFirst Then
+        sql_duty = "CREATE TABLE IF NOT EXISTS DUTY AS "
+        sql_duty_event = "CREATE TABLE IF NOT EXISTS DUTY_EVENT AS "
+        sql_duty_matrix = "CREATE TABLE IF NOT EXISTS DUTY_MATRIX AS "
+        sql_duty_var = "CREATE TABLE IF NOT EXISTS DUTY_VAR AS "
+        
+    Else
+        sql_duty = "INSERT OR REPLACE INTO DUTY  "
+        sql_duty_event = "INSERT OR REPLACE INTO DUTY_EVENT "
+        sql_duty_matrix = "INSERT OR REPLACE INTO DUTY_MATRIX "
+        sql_duty_var = "INSERT OR REPLACE INTO DUTY_VAR "
+    End If
+    
+    DB_Init
+    If verbose Then Debug.Print Now, " - Inicio DB_UNIFY. " & SQLite3LibVersion() & "..." & Format(Now(), "hh:mm:ss")
+
+    RetVal = DB_Open(data_base_dest, myDbHandle)
+
+    ' Define
+    RetVal = SQLite3PrepareV2(myDbHandle, "ATTACH '" & data_base_origin & "' AS db1", myStmtHandleAttach) 'prueba con est?ticos
+    RetVal = SQLite3Step(myStmtHandleAttach)
+
+    If RetVal = SQLITE_DONE Then
+        If verbose Then Debug.Print "Unifing tables:...." & Format(Now(), "hh:mm:ss")
+        
+        sql_duty = sql_duty & " SELECT '" & bbddID & "' || DUTY_COD AS DUTY_COD, STATUS_COD, TOKEN_ENTRY_ID, CAT_AREA_UNIT_COD, ORIGIN_COD, NAME, OWNER_COD, PRIOR_COD, LAST_EVENT_STAMP, PK, VOLUME, WHO, `WHEN`, CLIENT, IS_INC, VOLUMEN_ERR, COMENTARIOS FROM db1.DUTY "
+        RetVal = SQLite3PrepareV2(myDbHandle, sql_duty, myStmtHandle)
+        RetVal = SQLite3Step(myStmtHandle)
+        If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+    
+        sql_duty_event = sql_duty_event & " SELECT ENTRY_ID, '" & bbddID & "' || DUTY_COD AS DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP FROM db1.DUTY_EVENT "
+        RetVal = SQLite3PrepareV2(myDbHandle, sql_duty_event, myStmtHandle)
+        RetVal = SQLite3Step(myStmtHandle)
+        If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+        
+        sql_duty_matrix = sql_duty_matrix & " SELECT '" & bbddID & "' || DUTY_COD AS DUTY_COD, AREA_DEPT_CAT_COD, PORCENTAJE FROM db1.DUTY_MATRIX "
+        RetVal = SQLite3PrepareV2(myDbHandle, sql_duty_matrix, myStmtHandle)
+        RetVal = SQLite3Step(myStmtHandle)
+        If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+        
+        sql_duty_var = sql_duty_var & " SELECT '" & bbddID & "' || DUTY_COD AS DUTY_COD, INDEX_COD, VALUE FROM db1.DUTY_VAR "
+        RetVal = SQLite3PrepareV2(myDbHandle, sql_duty_var, myStmtHandle)
+        RetVal = SQLite3Step(myStmtHandle)
+        If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+    End If
+        
+    
+    RetVal = SQLite3PrepareV2(myDbHandle, "DETACH DATABASE db1", myStmtHandle)
+    RetVal = SQLite3Step(myStmtHandle)
+    If myStmtHandle > 0 Then SQLite3Finalize (myStmtHandle)
+        
+ErrHandle:
+    If Err Then Call Traza(lgFATAL, Err.Number & " " & Err.Description, "DB_UNIFY")
+
+    ' Finalize (delete) the statement
+    If myStmtHandleAttach > 0 Then SQLite3Finalize (myStmtHandleAttach)
+
+    'cierre connection
+    SQLite3Close (myDbHandle)
+    
+    SQLite3Free
+
+    If verbose Then Debug.Print Now, " - fin DB_UNIFY." & "..." & Format(Now(), "hh:mm:ss")
+End Sub
+

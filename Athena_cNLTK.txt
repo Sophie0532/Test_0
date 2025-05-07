@@ -1,0 +1,1183 @@
+Option Explicit
+
+Private stopwordDict As Object
+Private rulesVerbDict As Object
+Private pesosClasificadorDict As Object
+
+Private Const stopwordFileEN = "..\config\stopwordsEN.json"
+Private Const stopwordFileES = "..\config\stopwordsES.json"
+Private Const rulesVerbFileES = "..\config\rulesVerbES.json"
+
+Private Const pesosClasificador = "..\config\pesosClasificador.json"
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______PUBLIC_F(x)__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+' Get 1º Email text
+Public Function getLangHTML(ByVal body As String) As String
+On Error GoTo ErrHndlr
+    Dim b As String
+    
+    ' Clears header
+    Dim v As Variant: v = Split(body, "<body")                      ' Look for html body section
+    b = "<body" & CStr(v(1))                       ' Ignore <head> ==> (0) index
+    b = Replace(b, "<p class=MsoNormal><o:p>&nbsp;</o:p></p>", "")  ' Clear empty tags
+    b = Replace(b, Chr(34), "'")                              ' " to '
+    v = Split(b, "<p")                                              ' Look for tags with text, delimited by "<p"
+    
+    ' Clear tags
+    If UBound(v) > 0 Then
+        b = doClearNoText("" & v(0))
+        'Debug.Print "" & b
+        b = Trim(Mid(b, InStr(1, b, " lang") + 6, 3))
+    End If
+ErrHndlr:
+    getLangHTML = b
+End Function
+
+' Get 1º Email text
+Public Function getFirstEmailWithoutHTML(ByVal body As String, Optional doNormalize As Boolean = False) As String
+On Error GoTo ErrHndlr
+    Dim b As String
+    Dim regexObject As Object: Set regexObject = CreateObject("vbscript.regexp")
+
+    'Define RegExp html tags and comments
+    With regexObject
+        .pattern = "<!*[^<>]*>"
+        .Global = True
+        .IgnoreCase = True
+        .MultiLine = True
+    End With
+    
+    ' Clears header
+    Dim v As Variant: v = Split(body, "<body")                      ' Look for html body section
+    b = "<body" & CStr(v(1))                       ' Ignore <head> ==> (0) index
+    b = Replace(b, "<p class=MsoNormal><o:p>&nbsp;</o:p></p>", "")  ' Clear empty tags
+    b = Replace(b, Chr(34), "'")                              ' " to '
+    v = Split(b, "<p")                                              ' Look for tags with text, delimited by "<p"
+    
+    ' Just use 1º mail
+    Dim i As Long
+    i = 1                                                           ' Ignore first row wih <body tag ==> (0) index
+    b = ""                                                          ' Reset return var
+    
+    ' Clear tags
+    Do While i < UBound(v) And Len(v(i)) = Len(Replace(v(i), "<div style='border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt", ""))
+        If (LCase(Trim(doClearNoText(regexObject.Replace("<p" & v(i), "")))) <> "caution  this message is from an external sender  be vigilant  particularly with links and attachments  if you suspect it  report it immediately using the phishing button") Then
+            If verbose Then Debug.Print i & ".....'" & doClearNoText(regexObject.Replace("<p" & v(i), "")) & "'"
+            b = b & " " & Replace(Trim(regexObject.Replace("<p" & v(i), "")), "&nbsp;", " ")
+        End If
+        i = i + 1
+    Loop
+    
+    '//Normalization
+    If (doNormalize) Then
+        ' remove not valid char
+        b = doClearNoText(b)
+        
+        ' to lower case
+        b = LCase(b)
+    End If
+ErrHndlr:
+    Set regexObject = Nothing
+    getFirstEmailWithoutHTML = b
+End Function
+
+' Remove HTML tags from text
+Public Function doRemoveHTML(ByVal body As String) As String
+On Error GoTo ErrHndlr
+    Dim lang As String: lang = LCase(getLangHTML(body))
+    Select Case lang
+    Case "es"
+        'text from 1º mail without html tags
+        doRemoveHTML = doPrepareText(getFirstEmailWithoutHTML(body))
+    Case "en"
+        'text from 1º mail without html tags
+        doRemoveHTML = doPrepareTextEN(getFirstEmailWithoutHTML(body))
+    End Select
+    
+ErrHndlr:
+    
+End Function
+
+' Remove any not valid character from text
+Public Function doPrepareTextEN(corpus As String) As String
+On Error GoTo ErrHndlr
+    Dim text As String: text = corpus
+    Dim nltk As Dictionary: Set nltk = New Dictionary
+    
+    '//Normalization
+    ' remove not valid char
+    text = doClearNoText(text)
+    
+    ' to lower case
+    text = LCase(text)
+    
+    ' Tokenize
+    Dim v As Variant: v = Split(text, " ")                          ' split by space
+    
+    Dim i As Long: i = 0
+    
+    If verbose Then Debug.Print "Corpus..." + vbNewLine + text
+    If verbose Then Debug.Print "Total..." + CStr(UBound(v)) + vbTab + "..." + vbTab + CStr(LBound(v))
+    
+    Do While i <= UBound(v) And (UBound(v) > 0 Or Trim(corpus) <> "")
+        
+        ' Stopwords
+        If Trim(v(i)) <> "" And Not IsStopwordEN(Trim(v(i))) Then
+            ' Stemming
+            Dim stemmTxt As String: stemmTxt = stemm_EN(Trim(v(i)))
+            
+            If verbose Then Debug.Print CStr(i) + vbTab + CStr(v(i)) + vbTab + "..." + vbTab + stemmTxt
+            
+            ' Unique
+            If Trim(stemmTxt) <> "" Then
+                If Not nltk.Exists(stemmTxt) Then
+                    nltk.Add stemmTxt, 1
+                Else
+                    nltk(stemmTxt) = nltk(stemmTxt) + 1
+                End If
+            End If
+        Else
+            ' Ignore
+            If verbose Then Debug.Print CStr(i) + vbTab + stemmTxt + vbTab + "...Ingore"
+        End If
+        i = i + 1
+    Loop
+    
+    Dim b As String: b = ""
+    Dim key As Variant
+    For Each key In nltk.Keys
+        b = b + "|" + key + "(" + CStr(nltk(key)) + ")"
+    Next
+    
+    ' Remove 1º separator
+    If b <> "" Then b = Right(b, Len(b) - 1)
+    
+    doPrepareTextEN = b
+ErrHndlr:
+    If Err Then Debug.Print Err
+    Set nltk = Nothing
+End Function
+ 
+
+' Remove any not valid character from text
+Public Function doPrepareText(corpus As String) As String
+On Error GoTo ErrHndlr
+    Dim text As String: text = corpus
+    Dim nltk As Dictionary: Set nltk = New Dictionary
+    
+    '//Normalization
+    ' remove not valid char
+    text = doClearNoText(text)
+    
+    ' to lower case
+    text = LCase(text)
+    
+    ' Tokenize
+    Dim v As Variant: v = Split(text, " ")                          ' split by space
+    
+    Dim i As Long: i = 0
+    
+    If verbose Then Debug.Print "Corpus..." + vbNewLine + text
+    If verbose Then Debug.Print "Total..." + CStr(UBound(v)) + vbTab + "..." + vbTab + CStr(LBound(v))
+    
+    Do While i <= UBound(v) And (UBound(v) > 0 Or Trim(corpus) <> "")
+        
+        ' Stopwords
+        If Trim(v(i)) <> "" And Not IsStopword(Trim(v(i))) Then
+            ' Stemming
+            Dim stemmTxt As String: stemmTxt = stemm(Trim(v(i)))
+            
+            ' Lemmatization
+            If stemmTxt <> Trim(v(i)) Then
+                Dim sufTxt As String: sufTxt = substring_pos(Trim(v(i)), Len(stemmTxt))
+                sufTxt = IsVerb(sufTxt)
+                ' lemmatize verbs
+                If Len(sufTxt) > 0 Then v(i) = Trim(stemmTxt + sufTxt)
+                
+                v(i) = Trim(v(i))
+            Else
+                v(i) = Trim(v(i))
+            End If
+            
+            If verbose Then Debug.Print CStr(i) + vbTab + CStr(v(i)) + vbTab + "..." + vbTab + stemmTxt + vbTab + sufTxt
+            
+            ' Unique
+            If Trim(v(i)) <> "" Then
+                If Not nltk.Exists(v(i)) Then
+                    nltk.Add v(i), 1
+                Else
+                    nltk(v(i)) = nltk(v(i)) + 1
+                End If
+            End If
+        Else
+            ' Ignore
+            If verbose Then Debug.Print CStr(i) + vbTab + CStr(v(i)) + vbTab + "...Ingore"
+        End If
+        i = i + 1
+    Loop
+    
+    Dim b As String: b = ""
+    Dim key As Variant
+    For Each key In nltk.Keys
+        b = b + "|" + key + "(" + CStr(nltk(key)) + ")"
+    Next
+    
+    ' Remove 1º separator
+    If b <> "" Then b = Right(b, Len(b) - 1)
+    
+    doPrepareText = b
+ErrHndlr:
+    If Err Then Debug.Print Err
+    Set nltk = Nothing
+End Function
+
+' check if word is an stopword
+Public Function IsStopwordEN(ByVal wordToCheck As String) As Boolean
+    If stopwordDict Is Nothing Then Set stopwordDict = Class_Initialize(stopwordFileEN)
+    ' Check if the word exists in the dictionary
+    IsStopwordEN = stopwordDict.Exists(wordToCheck)
+End Function
+
+' check if word is an stopword
+Public Function IsStopword(ByVal wordToCheck As String) As Boolean
+    If stopwordDict Is Nothing Then Set stopwordDict = Class_Initialize(stopwordFileES)
+    ' Check if the word exists in the dictionary
+    IsStopword = stopwordDict.Exists(wordToCheck)
+End Function
+
+' check if suffix belongs to a verb //returns lemma's suffix
+Public Function IsVerb(ByVal suffixToCheck As String) As String
+    IsVerb = ""
+    If rulesVerbDict Is Nothing Then Set rulesVerbDict = Class_Initialize(rulesVerbFileES)
+    ' Check if the suffix exists in the dictionary and return lemma's suffix
+    If rulesVerbDict.Exists(suffixToCheck) Then IsVerb = rulesVerbDict(suffixToCheck)
+End Function
+
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______STOPWORDS__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+' Initialize stopword Es Dictionary
+Private Function Class_Initialize(file As String) As Object
+    ' Load stopwords from file
+    Set Class_Initialize = LoadStopwordsFromFile(DDBB_Athena_local_file_path + file)
+End Function
+
+' Load stopword Es Dictionary into class var
+Private Function LoadStopwordsFromFile(ByVal filePath As String) As Object
+On Error GoTo ErrHndlr
+    ' Check if the file exists
+    If Dir(filePath) = "" Then
+        MsgBox "Stopwords file not found: " & filePath
+        Exit Function
+    End If
+    
+    ' Read stopwords from the file and add them to the dictionary
+    Dim fileContent As String
+    Dim fileLines As Variant
+    
+    Open filePath For Input As #1
+    fileContent = Input$(LOF(1), 1)
+    Close #1
+
+    ' Create a Dictionary to store stopwords
+    Set LoadStopwordsFromFile = Athena_cJSON.ParseJson(fileContent)
+ErrHndlr:
+    If Err Then Debug.Print Err.Description
+End Function
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______CHAR_MANAGEMENT__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+' Recursive replacement logic
+Private Function doReplace(text As String, find As String, replaceStr As String) As String
+    Dim newText As String: newText = text
+    Do While (Len(newText) <> Len(Replace(newText, find, replaceStr)))
+        newText = Replace(newText, find, replaceStr)
+    Loop
+    doReplace = newText
+End Function
+
+' Remove any character with no text value from text
+Private Function doClearNoText(body As String) As String
+    Dim text As String: text = body
+    
+    ' espacios incio/fin
+    text = Trim(body)
+    
+    ' saltos/tabulación/dobles espacios
+    text = doReplace(text, vbNewLine, " ")
+    text = doReplace(text, vbLf, " ")
+    text = doReplace(text, vbCr, " ")
+    text = doReplace(text, vbTab, " ")
+    text = doReplace(text, "  ", " ")
+    
+    text = doClearASCIIControlText(text)
+    text = doClearASCIIImpresosText(text)
+    text = doClearASCIIIdiomaText(text)
+    
+    doClearNoText = text
+End Function
+
+' Remove any ASCII Control character value from text
+Private Function doClearASCIIControlText(body As String) As String
+    Dim text As String: text = body
+    
+    'Caracteres ASCII de control
+    text = Replace(text, Chr(0), "")   '(carácter nulo)
+    text = Replace(text, Chr(1), "")   '(inicio encabezado)
+    text = Replace(text, Chr(2), "")   '(inicio texto)
+    text = Replace(text, Chr(3), "")   '(fin de texto)
+    text = Replace(text, Chr(4), "")   '(fin transmisión)
+    text = Replace(text, Chr(5), "")   '(consulta)
+    text = Replace(text, Chr(6), "")   '(reconocimiento)
+    text = Replace(text, Chr(7), "")   '(timbre)
+    text = Replace(text, Chr(8), "")   '(retroceso)
+    text = Replace(text, Chr(9), "")   '(tab horizontal)
+    text = Replace(text, Chr(10), "")  '(nueva línea)
+    text = Replace(text, Chr(11), "")  '(tab vertical)
+    text = Replace(text, Chr(12), "")  '(nueva página)
+    text = Replace(text, Chr(13), "")  '(retorno de carro)
+    text = Replace(text, Chr(14), "")  '(desplaza afuera)
+    text = Replace(text, Chr(15), "")  '(desplaza adentro)
+    text = Replace(text, Chr(16), "")  '(esc.vínculo datos)
+    text = Replace(text, Chr(17), "")  '(control disp. 1)
+    text = Replace(text, Chr(18), "")  '(control disp. 2)
+    text = Replace(text, Chr(19), "")  '(control disp. 3)
+    text = Replace(text, Chr(20), "")  '(control disp. 4)
+    text = Replace(text, Chr(21), "")  '(conf. negativa)
+    text = Replace(text, Chr(22), "")  '(inactividad sínc)
+    text = Replace(text, Chr(23), "")  '(fin bloque trans)
+    text = Replace(text, Chr(24), "")  '(cancelar)
+    text = Replace(text, Chr(25), "")  '(fin del medio)
+    text = Replace(text, Chr(26), "")  '(sustitución)
+    text = Replace(text, Chr(27), "")  '(escape)
+    text = Replace(text, Chr(28), "")  '(sep. archivos)
+    text = Replace(text, Chr(29), "")  '(sep. grupos)
+    text = Replace(text, Chr(30), "")  '(sep. registros)
+    text = Replace(text, Chr(31), "")  '(sep. unidades)
+    text = Replace(text, Chr(127), "")  '(suprimir)
+    
+    doClearASCIIControlText = text
+End Function
+
+' Remove any ASCII Printable character value from text
+Private Function doClearASCIIImpresosText(body As String) As String
+    Dim text As String: text = body
+    
+    'Caracteres ASCII imprimibles
+    'text = replace(text, Chr(32), "")  'espacio
+    text = Replace(text, Chr(33), "")  '!
+    text = Replace(text, Chr(34), "")  '"
+    text = Replace(text, Chr(35), " ")  '#
+    text = Replace(text, Chr(36), "")  '$
+    text = Replace(text, Chr(37), " ")  '%
+    text = Replace(text, Chr(38), " ")  '&
+    text = Replace(text, Chr(39), " ")  ''
+    text = Replace(text, Chr(40), " ")  '(
+    text = Replace(text, Chr(41), " ")  ')
+    text = Replace(text, Chr(42), " ")  '*
+    text = Replace(text, Chr(43), " ")  '+
+    text = Replace(text, Chr(44), " ")  ',
+    text = Replace(text, Chr(45), " ")  '-
+    text = Replace(text, Chr(46), " ")  '.
+    text = Replace(text, Chr(47), " ")  '/
+    
+    text = Replace(text, Chr(48), "")  '0
+    text = Replace(text, Chr(49), "")  '1
+    text = Replace(text, Chr(50), "")  '2
+    text = Replace(text, Chr(51), "")  '3
+    text = Replace(text, Chr(52), "")  '4
+    text = Replace(text, Chr(53), "")  '5
+    text = Replace(text, Chr(54), "")  '6
+    text = Replace(text, Chr(55), "")  '7
+    text = Replace(text, Chr(56), "")  '8
+    text = Replace(text, Chr(57), "")  '9
+    
+    text = Replace(text, Chr(58), " ")  ':
+    text = Replace(text, Chr(59), " ")  ';
+    text = Replace(text, Chr(60), " ")  '<
+    text = Replace(text, Chr(61), " ")  '=
+    text = Replace(text, Chr(62), " ")  '>
+    text = Replace(text, Chr(63), " ")  '?
+    text = Replace(text, Chr(64), "")  '@
+    
+    text = Replace(text, Chr(91), " ")  '[
+    text = Replace(text, Chr(92), " ")  '\
+    text = Replace(text, Chr(93), " ")  ']
+    text = Replace(text, Chr(94), " ")  '^
+    text = Replace(text, Chr(95), "")  '_
+    text = Replace(text, Chr(96), " ")  '`
+    
+    text = Replace(text, Chr(123), " ")  '{
+    text = Replace(text, Chr(124), " ")  '|
+    text = Replace(text, Chr(125), " ")  '}
+    text = Replace(text, Chr(126), "")  '~
+    text = Replace(text, Chr(127), "")  '
+    text = Replace(text, Chr(128), "")  '€
+    text = Replace(text, Chr(129), "")  '
+    text = Replace(text, Chr(130), "")  '‚
+    text = Replace(text, Chr(131), "")  'ƒ
+    text = Replace(text, Chr(132), "")  '„
+    text = Replace(text, Chr(133), "")  '…
+    text = Replace(text, Chr(134), "")  '†
+    text = Replace(text, Chr(135), "")  '‡
+    text = Replace(text, Chr(136), "")  'ˆ
+    text = Replace(text, Chr(137), "")  '‰
+    text = Replace(text, Chr(138), "")  'Š
+    text = Replace(text, Chr(139), "")  '‹
+    text = Replace(text, Chr(140), "")  'Œ
+    text = Replace(text, Chr(141), "")  '
+    text = Replace(text, Chr(142), "")  'Ž
+    text = Replace(text, Chr(143), "")  '
+    text = Replace(text, Chr(144), "")  '
+    text = Replace(text, Chr(145), "")  '‘
+    text = Replace(text, Chr(146), "")  '’
+    text = Replace(text, Chr(147), "")  '“
+    text = Replace(text, Chr(148), "")  '”
+    text = Replace(text, Chr(149), "")  '•
+    text = Replace(text, Chr(150), "")  '–
+    text = Replace(text, Chr(151), "")  '—
+    text = Replace(text, Chr(152), "")  '˜
+    text = Replace(text, Chr(153), "")  '™
+    text = Replace(text, Chr(154), "")  'š
+    text = Replace(text, Chr(155), "")  '›
+    text = Replace(text, Chr(156), "")  'œ
+    text = Replace(text, Chr(157), "")  '
+    text = Replace(text, Chr(158), "")  'ž
+    text = Replace(text, Chr(159), "")  'Ÿ
+    text = Replace(text, Chr(160), "")  '>
+    text = Replace(text, Chr(161), "")  '¡
+    text = Replace(text, Chr(162), "")  '¢
+    text = Replace(text, Chr(163), "")  '£
+    text = Replace(text, Chr(164), "")  '¤
+    text = Replace(text, Chr(165), "")  '¥
+    text = Replace(text, Chr(166), "")  '¦
+    text = Replace(text, Chr(167), "")  '§
+    text = Replace(text, Chr(168), "")  '¨
+    text = Replace(text, Chr(169), "")  '©
+    text = Replace(text, Chr(170), "")  'ª
+    text = Replace(text, Chr(171), "")  '«
+    text = Replace(text, Chr(172), "")  '¬
+    text = Replace(text, Chr(173), "")  '­
+    text = Replace(text, Chr(174), "")  '®
+    text = Replace(text, Chr(175), "")  '¯
+    text = Replace(text, Chr(176), "")  '°
+    text = Replace(text, Chr(177), "")  '±
+    text = Replace(text, Chr(178), "")  '²
+    text = Replace(text, Chr(179), "")  '³
+    text = Replace(text, Chr(180), "")  '´
+    text = Replace(text, Chr(181), "")  'µ
+    text = Replace(text, Chr(182), "")  '¶
+    text = Replace(text, Chr(183), "")  '·
+    text = Replace(text, Chr(184), "")  '¸
+    text = Replace(text, Chr(185), "")  '¹
+    text = Replace(text, Chr(186), "")  'º
+    text = Replace(text, Chr(187), "")  '»
+    text = Replace(text, Chr(188), "")  '¼
+    text = Replace(text, Chr(189), "")  '½
+    text = Replace(text, Chr(190), "")  '¾
+    text = Replace(text, Chr(191), "")  '¿
+    
+    text = Replace(text, Chr(215), "")  '×
+   
+    text = Replace(text, Chr(247), "")  '÷
+
+    doClearASCIIImpresosText = text
+End Function
+
+' Remove any ASCII Regional character value from text
+Private Function doClearASCIIIdiomaText(body As String) As String
+    Dim text As String: text = body
+    
+    text = Replace(text, Chr(198), "")  'Æ
+    text = Replace(text, Chr(199), "")  'Ç
+    
+    text = Replace(text, Chr(208), "")  'Ð
+    text = Replace(text, Chr(209), "")  'Ñ
+    
+    text = Replace(text, Chr(216), "")  'Ø
+    
+    text = Replace(text, Chr(221), "")  'Ý
+    text = Replace(text, Chr(222), "")  'Þ
+    text = Replace(text, Chr(223), "")  'ß
+    
+    text = Replace(text, Chr(230), "")  'æ
+    text = Replace(text, Chr(231), "")  'ç
+    
+    text = Replace(text, Chr(240), "")  'ð
+    text = Replace(text, Chr(241), "n")  'ñ
+    
+    text = Replace(text, Chr(248), "")  'ø
+    
+    text = Replace(text, Chr(253), "")  'ý
+    text = Replace(text, Chr(254), "")  'þ
+    text = Replace(text, Chr(255), "")  'ÿ
+    
+    doClearASCIIIdiomaText = text
+End Function
+
+' Remove any ASCII Regional Mark character value from text
+Private Function doClearASCIIMarcasText(body As String) As String
+    Dim text As String: text = body
+    
+    text = Replace(text, Chr(192), "A")  'À
+    text = Replace(text, Chr(193), "A")  'Á
+    text = Replace(text, Chr(194), "A")  'Â
+    text = Replace(text, Chr(195), "A")  'Ã
+    text = Replace(text, Chr(196), "A")  'Ä
+    text = Replace(text, Chr(197), "A")  'Å
+    
+    text = Replace(text, Chr(200), "E")  'È
+    text = Replace(text, Chr(201), "E")  'É
+    text = Replace(text, Chr(202), "E")  'Ê
+    text = Replace(text, Chr(203), "E")  'Ë
+    text = Replace(text, Chr(204), "I")  'Ì
+    text = Replace(text, Chr(205), "I")  'Í
+    text = Replace(text, Chr(206), "I")  'Î
+    text = Replace(text, Chr(207), "I")  'Ï
+    
+    text = Replace(text, Chr(210), "O")  'Ò
+    text = Replace(text, Chr(211), "O")  'Ó
+    text = Replace(text, Chr(212), "O")  'Ô
+    text = Replace(text, Chr(213), "O")  'Õ
+    text = Replace(text, Chr(214), "O")  'Ö
+    
+    text = Replace(text, Chr(217), "U")  'Ù
+    text = Replace(text, Chr(218), "U")  'Ú
+    text = Replace(text, Chr(219), "U")  'Û
+    text = Replace(text, Chr(220), "U")  'Ü
+    
+    text = Replace(text, Chr(224), "a")  'à
+    text = Replace(text, Chr(225), "a")  'á
+    text = Replace(text, Chr(226), "a")  'â
+    text = Replace(text, Chr(227), "a")  'ã
+    text = Replace(text, Chr(228), "a")  'ä
+    text = Replace(text, Chr(229), "a")  'å
+    
+    text = Replace(text, Chr(232), "e")  'è
+    text = Replace(text, Chr(233), "e")  'é
+    text = Replace(text, Chr(234), "e")  'ê
+    text = Replace(text, Chr(235), "e")  'ë
+    text = Replace(text, Chr(236), "i")  'ì
+    text = Replace(text, Chr(237), "i")  'í
+    text = Replace(text, Chr(238), "i")  'î
+    text = Replace(text, Chr(239), "i")  'ï
+    
+    text = Replace(text, Chr(242), "o")  'ò
+    text = Replace(text, Chr(243), "o")  'ó
+    text = Replace(text, Chr(244), "o")  'ô
+    text = Replace(text, Chr(245), "o")  'õ
+    text = Replace(text, Chr(246), "o")  'ö
+    
+    text = Replace(text, Chr(249), "u")  'ù
+    text = Replace(text, Chr(250), "u")  'ú
+    text = Replace(text, Chr(251), "u")  'û
+    text = Replace(text, Chr(252), "u")  'ü
+    
+    doClearASCIIMarcasText = text
+End Function
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______NLTK__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+
+Private Function doTokenization(corpus As String) As Variant
+
+End Function
+
+Private Function doLowerCase() As String
+
+End Function
+
+Private Function removeStopWords() As Variant
+
+End Function
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______STEMMING__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+Private Function is_vowel(C As String) As Boolean
+    is_vowel = (C = "a" Or C = "e" Or C = "i" Or C = "o" Or C = "u" Or C = "á" Or C = "é" Or C = "í" Or C = "ó" Or C = "ú")
+End Function
+
+Private Function getNextVowelPos(word As String, Optional start As Long = 1) As Long
+    Dim strlen As Long: strlen = Len(word)
+    Dim i As Long: i = start
+    Do While getNextVowelPos = 0 And i <= Len(word)
+        If (is_vowel(Mid(word, i, 1))) Then getNextVowelPos = i
+        i = i + 1
+    Loop
+    If getNextVowelPos = 0 Then getNextVowelPos = strlen
+End Function
+
+Private Function getNextConsonantPos(word As String, Optional start As Long = 1) As Long
+    Dim strlen As Long: strlen = Len(word)
+    Dim i As Long: i = start
+    Do While getNextConsonantPos = 0 And i <= Len(word)
+        If Not (is_vowel(Mid(word, i, 1))) Then getNextConsonantPos = i
+        i = i + 1
+    Loop
+    If getNextConsonantPos = 0 Then getNextConsonantPos = strlen
+End Function
+
+Private Function endsinArr(word As String, suffixes As Variant) As String
+    Dim i As Long
+    For i = 0 To UBound(suffixes)
+        If (endsin(word, CStr(suffixes(i)))) Then
+            endsinArr = CStr(suffixes(i))
+            Exit For
+        End If
+    Next
+End Function
+
+Private Function endsin(word As String, suffix As String) As Boolean
+    If Len(word) < Len(suffix) Then
+        endsin = False
+    Else
+        endsin = substring_pos(word, Len(suffix) * -1) = suffix
+    End If
+End Function
+
+Private Function substring(word As String, suffix As String) As String
+    substring = Mid(word, 1, Len(word) - Len(suffix))
+End Function
+
+Private Function substring_pos(word As String, pos As Long) As String
+    If pos < 0 Then
+        substring_pos = Right(word, pos * -1)
+    Else
+        If Len(word) < pos Then pos = Len(word)
+        substring_pos = Right(word, Len(word) - pos)
+    End If
+End Function
+
+Private Function removeAccent(word As String) As String
+    removeAccent = doClearASCIIMarcasText(word)
+End Function
+
+Public Function stemm(wordIn As String) As String
+On Error GoTo ErrHndlr
+    Dim word As String: word = LCase(wordIn): word = Trim(word)
+    
+    If Len(word) <= 2 Then
+        stemm = word
+    Else
+        Dim r1 As Long, r2 As Long, rv As Long, strlen As Long
+        strlen = Len(word): r1 = strlen: r2 = strlen: rv = strlen
+        
+        '//R1 is the region after the first non-vowel following a vowel, or is the null region at the end of the word if there is no such non-vowel.
+        Dim i As Long: i = 1
+        Do While i < Len(word) And r1 = strlen
+            If (is_vowel(Mid(word, i, 1)) And Not is_vowel(Mid(word, i + 1, 1))) Then r1 = i + 1 ' i + 2 (-1) al empezar en 1
+            i = i + 1
+        Loop
+    
+        '//R2 is the region after the first non-vowel following a vowel in R1, or is the null region at the end of the word if there is no such non-vowel.
+        i = r1 + 1
+        Do While i < Len(word) And r2 = strlen
+            If (is_vowel(Mid(word, i, 1)) And Not is_vowel(Mid(word, i + 1, 1))) Then r2 = i + 1 ' i + 2 (-1) al empezar en 1
+            i = i + 1
+        Loop
+        
+        '//RV,  If the second letter is a consonant -> is the region after the next following vowel
+        '       If the first two letters are vowels -> is the region after the next consonant
+        '       Otherwise (consonant-vowel case)    -> is the region after the third letter
+        '
+        '    o l i v a     t r a b a j o
+        '         |...|         |.......|
+        '    á u r e o
+        '         |...|
+        '    m a c h o
+        '         |...|
+        '
+        If Len(word) > 3 Then
+            '// If the second letter is a consonant, RV is the region after the next following vowel
+            If Not (is_vowel(Mid(word, 2, 1))) Then
+                rv = getNextVowelPos(word, 2) '+ 1
+            '// or if the first two letters are vowels, RV is the region after the next consonant
+            ElseIf is_vowel(Mid(word, 1, 1)) And is_vowel(Mid(word, 2, 1)) Then
+                rv = getNextConsonantPos(word, 2) '+ 1
+            '//otherwise (consonant-vowel case) RV is the region after the third letter. But RV is the end of the word if these positions cannot be found.
+            Else
+                rv = 3
+            End If
+        End If
+        
+        Dim r1_txt As String, r2_txt As String, rv_txt As String, word_orig As String
+        r1_txt = substring_pos(word, r1)
+        r2_txt = substring_pos(word, r2)
+        rv_txt = substring_pos(word, rv)
+        word_orig = word
+        
+        If verbose Then Debug.Print r1 & vbNewLine & r2 & vbNewLine & rv
+        If verbose Then Debug.Print "PreStep...." & vbNewLine & r1_txt & vbNewLine & r2_txt & vbNewLine & rv_txt
+        
+        ' Always do steps 0 and 1
+        '// Step 0: Attached pronoun
+        Dim pronoun_suf As Variant: pronoun_suf = Split("noslas,noslos,melas,melos,nosla,noslo,selas,selos,telas,telos,mela,melo,sela,selo,tela,telo,las,les,los,nos,la,le,lo,me,se,te", ",")
+        Dim pronoun_suf_pre1 As Variant: pronoun_suf_pre1 = Split("éndo,ándo,ár,ér,ír", ",")
+        Dim pronoun_suf_pre2 As Variant: pronoun_suf_pre2 = Split("ando,endo,ar,er,ir", ",")
+        
+        Dim suf As String: suf = endsinArr(word, pronoun_suf)
+        If suf <> "" Then
+            Dim pre_suff As String: pre_suff = endsinArr(substring(rv_txt, suf), pronoun_suf_pre1)
+            If pre_suff <> "" Then
+                word = removeAccent(substring(word, suf))
+            Else
+                pre_suff = endsinArr(substring(rv_txt, suf), pronoun_suf_pre2)
+                If pre_suff <> "" Or (endsin(word, "yendo") And Left(substring_pos(word, -Len(suf) - 6), 1) = "u") Then
+                    word = substring(word, suf)
+                End If
+            End If
+        End If
+
+        If word <> word_orig Then
+            r1_txt = substring_pos(word, r1)
+            r2_txt = substring_pos(word, r2)
+            rv_txt = substring_pos(word, rv)
+        End If
+        
+        If verbose Then Debug.Print "Step_0...." & vbNewLine & suf & vbNewLine & pre_suff & vbNewLine & word & vbNewLine & r1_txt & vbNewLine & r2_txt & vbNewLine & rv_txt
+        
+        
+        '// Step 1: Standard suffix removal
+        Dim word_after0 As String: word_after0 = word
+        
+        Dim suf1 As Variant: suf1 = Split("anza,anzas,ico,ica,icos,icas,ismo,ismos,able,ables,ible,ibles,ista,istas,oso,osa,osos,osas,amiento,amientos,imiento,imientos", ",")
+        Dim suf2 As Variant: suf2 = Split("icadora,icador,icación,icadoras,icadores,icaciones,icante,icantes,icancia,icancias,adora,ador,ación,adoras,adores,aciones,ante,antes,ancia,ancias", ",")
+        Dim suf3 As Variant: suf3 = Split("logía,logías", ",")
+        Dim suf4 As Variant: suf4 = Split("ución,uciones", ",")
+        Dim suf5 As Variant: suf5 = Split("encia,encias", ",")
+        Dim suf6 As Variant: suf6 = Split("ativamente,ivamente,osamente,icamente,adamente", ",")
+        Dim suf7 As Variant: suf7 = Split("amente", ",")
+        Dim suf8 As Variant: suf8 = Split("antemente,ablemente,iblemente,mente", ",")
+        Dim suf9 As Variant: suf9 = Split("abilidad,abilidades,icidad,icidades,ividad,ividades,idad,idades", ",")
+        Dim suf10 As Variant: suf10 = Split("ativa,ativo,ativas,ativos,iva,ivo,ivas,ivos", ",")
+        
+        suf = endsinArr(r2_txt, suf1) ' anza,anzas,ico,ica...
+        If (suf <> "") Then
+            word = substring(word, suf)
+        Else
+            suf = endsinArr(r2_txt, suf2) ' icadora,icador,icación....
+            If (suf <> "") Then
+                word = substring(word, suf)
+            Else
+                suf = endsinArr(r2_txt, suf3) ' logía,logías
+                If (suf <> "") Then
+                    word = substring(word, suf) + "log"
+                Else
+                    suf = endsinArr(r2_txt, suf4) ' ución, uciones
+                    If (suf <> "") Then
+                        word = substring(word, suf) + "u"
+                    Else
+                        suf = endsinArr(r2_txt, suf5) ' encia, encias
+                        If (suf <> "") Then
+                            word = substring(word, suf) + "ente"
+                        Else
+                            suf = endsinArr(r2_txt, suf6) ' activamente, ivamente,...
+                            If (suf <> "") Then
+                                word = substring(word, suf)
+                            Else
+                                suf = endsinArr(r2_txt, suf7) ' amente
+                                If (suf <> "") Then
+                                    word = substring(word, suf)
+                                Else
+                                    suf = endsinArr(r2_txt, suf8) ' antemente,ablemente,iblemente,...
+                                    If (suf <> "") Then
+                                        word = substring(word, suf)
+                                    Else
+                                        suf = endsinArr(r2_txt, suf9) ' abilidad,abilidades,icidad,...
+                                        If (suf <> "") Then
+                                            word = substring(word, suf)
+                                        Else
+                                            suf = endsinArr(r2_txt, suf10) ' ativa,ativo,ativas,...
+                                            If (suf <> "") Then
+                                                word = substring(word, suf)
+                                            End If
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        End If
+                    End If
+                End If
+            End If
+        End If
+        
+        If word <> word_after0 Then
+            r1_txt = substring_pos(word, r1)
+            r2_txt = substring_pos(word, r2)
+            rv_txt = substring_pos(word, rv)
+        End If
+        
+        If verbose Then Debug.Print "Step_1...." & vbNewLine & suf & vbNewLine & pre_suff & vbNewLine & word & vbNewLine & word_after0 & vbNewLine & r1_txt & vbNewLine & r2_txt & vbNewLine & rv_txt
+        
+        Dim word_after1 As String: word_after1 = word
+        
+        '// Do step 2a if no ending was removed by step 1.
+        '//Step 2a: Verb suffixes beginning y
+        If word_after0 = word_after1 Then
+            Dim sufY As Variant: sufY = Split("ya,ye,yan,yen,yeron,yendo,yo,yó,yas,yes,yais,yamos", ",")
+            suf = endsinArr(rv_txt, sufY) ' ya,ye,yan...
+            If suf <> "" And (Left(substring_pos(word, -Len(suf) - 1), 1) = "u") Then
+                word = substring(word, suf)
+            End If
+            
+            If word <> word_after1 Then
+                r1_txt = substring_pos(word, r1)
+                r2_txt = substring_pos(word, r2)
+                rv_txt = substring_pos(word, rv)
+            End If
+            
+            Dim word_after2a As String: word_after2a = word
+            
+            '// Do Step 2b if step 2a was done, but failed to remove a suffix.
+            '//Step 2b: Other verb suffixes
+            If word_after2a = word_after1 Then
+                Dim sufE As Variant: sufE = Split("cionen,ciones,cione,üeis,üen,úen,üe,ecéis,ecen,eces,ece,en,es,éis", ",")
+                suf = endsinArr(rv_txt, sufE) ' en,es,éis...
+                If suf <> "" Then
+                    word = substring(word, suf)
+                    If (endsin(word, "gu")) Then word = substring(word, "u")
+                Else
+                    Dim sufA As Variant: sufA = Split("aríamos,eríamos,iéramos,iésemos,iríamos,ábamos,áramos,aremos,aríais,ásemos,asteis,eremos,eríais,ierais,ieseis,iremos,iríais,isteis,abais,arais,aréis,arían,arías,aseis,eréis,erían,erías,íamos,iendo,ieran,ieras,ieron,iesen,ieses,iréis,irían,irías,aban,abas,adas,ados,amos,ando,aran,arán,aras,arás,aría,aron,asen,ases,aste,emos,erán,erás,ería,íais,idas,idos,iera,iese,imos,irán,irás,iría,iste,aba,ada,ado,áis,ara,ará,aré,ase,erá,eré,ían,ías,ida,ido,irá,iré,ad,an,ar,as,ed,er,ía,id,ió,ir,ís", ",")
+                    suf = endsinArr(rv_txt, sufA) ' arían,arías,arán...
+                    If suf <> "" Then
+                        word = substring(word, suf)
+                    End If
+                End If
+            End If
+        End If
+        
+        r1_txt = substring_pos(word, r1)
+        r2_txt = substring_pos(word, r2)
+        rv_txt = substring_pos(word, rv)
+        
+        If verbose Then Debug.Print "Step_2...." & vbNewLine & suf & vbNewLine & pre_suff & vbNewLine & word & vbNewLine & word_after0 & vbNewLine & word_after1 & vbNewLine & r1_txt & vbNewLine & r2_txt & vbNewLine & rv_txt
+        
+        '// Always do step 3
+        '//Step 3: residual suffix
+        Dim sufO As Variant: sufO = Split("as,es,os,a,o,á,í,ó", ",")
+        suf = endsinArr(rv_txt, sufO) ' os,a,o...
+        If suf <> "" Then
+            word = substring(word, suf)
+        Else
+            Dim sufU As Variant: sufU = Split("e,é", ",")
+            suf = endsinArr(rv_txt, sufU) ' e,é
+            If suf <> "" Then
+                word = substring(word, suf)
+                rv_txt = substring_pos(word, rv)
+                If endsin(rv_txt, "u") And endsin(word, "gu") Then
+                    word = substring(word, "u")
+                End If
+            End If
+        End If
+        
+        stemm = removeAccent(word)
+    End If
+ErrHndlr:
+    Err.Clear
+End Function
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______STEMMING_____ENG_____________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+Public Function returnCVCpattern(word As String) As String
+On Error GoTo ErrHndlr
+    'local variables
+    Dim chars As Variant
+    Dim const_vowel As String
+    Dim i As Long
+    
+    'converting string to byte array
+    word = LCase(word)
+    chars = Split(Left(StrConv(word, vbUnicode), Len(StrConv(word, vbUnicode)) - 1), vbNullChar)
+        
+    'checking each character to see if it is a consonent or a vowel. also inputs the information in const_vowel
+    For i = 0 To UBound(chars)
+        If is_vowel(CStr(chars(i))) Then
+            const_vowel = const_vowel + "v"
+        ElseIf CStr(chars(i)) = "y" Then
+            'if y is not the first character, only then check the previous character
+            If i > 0 Then
+                'check to see if previous character is a consonent
+                If Not (is_vowel(CStr(chars(i - 1)))) Then
+                    const_vowel = const_vowel + "v"
+                Else
+                    const_vowel = const_vowel + "c"
+                End If
+            Else
+                const_vowel = const_vowel + "c"
+            End If
+        Else
+            const_vowel = const_vowel + "c"
+        End If
+    Next
+    returnCVCpattern = const_vowel
+ErrHndlr:
+End Function
+
+Public Function countCVCm(word As String) As Long
+On Error Resume Next
+    'declaring local variables
+    Dim const_vowel As String: const_vowel = ""
+    Dim i As Long
+    Dim m As Long: m = 0
+    Dim flag As Boolean: flag = False
+    Dim pattern As String
+    Dim chars As Variant
+    
+    If Not Len(word) = 0 Then
+        'find out the CVC pattern
+        pattern = returnCVCpattern(word)
+        
+        'converting const_vowel to Long array
+        chars = Split(Left(StrConv(pattern, vbUnicode), Len(StrConv(pattern, vbUnicode)) - 1), vbNullChar)
+        
+        'counting the number of m's...
+        For i = 0 To UBound(chars)
+            If CStr(chars(i)) = "v" Or flag Then
+                flag = True
+                If CStr(chars(i)) = "c" Then
+                    m = m + 1
+                    flag = False
+                End If
+            End If
+        Next
+    End If
+    
+    countCVCm = m
+End Function
+
+Public Function hasVowel(word As String, Optional start As Long = 1) As Boolean
+On Error Resume Next
+    Dim pattern As String: pattern = returnCVCpattern(word)
+    Dim chars As Variant: chars = Split(Left(StrConv(pattern, vbUnicode), Len(StrConv(pattern, vbUnicode)) - 1), vbNullChar)
+    Dim i As Long: i = start
+    Do While Not hasVowel And i <= Len(word)
+        If (CStr(chars(i - 1)) = "v") Then hasVowel = True
+        i = i + 1
+    Loop
+End Function
+
+Public Function doEndsDoubleConsonent(word As String) As Boolean
+On Error Resume Next
+    If Len(word) >= 2 Then
+        Dim holds_ends As String: holds_ends = Right(word, 2)
+        Dim chars As Variant: chars = Split(Left(StrConv(holds_ends, vbUnicode), Len(StrConv(holds_ends, vbUnicode)) - 1), vbNullChar)
+        If holds_ends = "yy" And Len(word) > 2 Then
+            If (is_vowel(Left(Right(word, 3), 1))) Then
+                doEndsDoubleConsonent = True
+            End If
+        ElseIf chars(0) = chars(1) And Not (is_vowel(CStr(chars(0)))) Then
+            doEndsDoubleConsonent = True
+        End If
+    End If
+End Function
+
+Public Function doEndsCVC(word As String) As Boolean
+On Error Resume Next
+    If Len(word) >= 3 Then
+        Dim pattern As String: pattern = Right(returnCVCpattern(word), 3)
+        If pattern = "cvc" Then
+            If Not (substring_pos(word, -1) = "w" Or substring_pos(word, -1) = "x" Or substring_pos(word, -1) = "y") Then
+                doEndsCVC = True
+            End If
+        End If
+    End If
+End Function
+
+Public Function stemm_EN(word As String) As String
+On Error Resume Next
+    Dim suf As String
+    Dim m As Long: m = 0
+    Dim rv_txt As String: rv_txt = doClearNoText(word)
+    
+    'only strings greater than 2 are stemmed
+    If Len(Trim(word)) > 2 Then
+        '// Step 1a
+        Dim suf1a As Variant: suf1a = Split("sses,ss,ies,s", ",")
+        suf = endsinArr(rv_txt, suf1a)
+        Select Case suf
+        Case "sses"
+            rv_txt = substring(rv_txt, suf) + "ss"
+        Case "ss"
+            rv_txt = substring(rv_txt, suf) + "ss"
+        Case "ies"
+            rv_txt = substring(rv_txt, suf) + "i"
+        Case "s"
+            rv_txt = substring(rv_txt, suf)
+        End Select
+        
+        '// Step 1b
+        Dim suf_Ed_Ing As Boolean
+        Dim suf1b As Variant: suf1b = Split("eed,ed,ing", ",")
+        suf = endsinArr(rv_txt, suf1b)
+        Select Case suf
+        Case "eed"
+            m = countCVCm(substring(rv_txt, suf))
+            If m > 0 Then
+                rv_txt = substring(rv_txt, suf) + "ee"
+            End If
+        Case "ed"
+            If hasVowel(substring(rv_txt, suf)) Then
+                rv_txt = substring(rv_txt, suf)
+                suf_Ed_Ing = True
+            End If
+        Case "ing"
+            If hasVowel(substring(rv_txt, suf)) Then
+                rv_txt = substring(rv_txt, suf)
+                suf_Ed_Ing = True
+            End If
+        End Select
+        
+        If suf_Ed_Ing Then
+            Dim suf1bb As Variant: suf1b = Split("at,bl,iz", ",")
+            suf = endsinArr(rv_txt, suf1bb)
+            Select Case suf
+            Case "at"
+                rv_txt = substring(rv_txt, suf) + "ate"
+            Case "bl"
+                rv_txt = substring(rv_txt, suf) + "ble"
+            Case "iz"
+                rv_txt = substring(rv_txt, suf) + "ize"
+            Case Else
+                If doEndsDoubleConsonent(rv_txt) Then
+                    Select Case substring_pos(rv_txt, -1)
+                    Case "l"
+                    Case "s"
+                    Case "z"
+                    Case Else
+                        rv_txt = substring(rv_txt, substring_pos(rv_txt, -1))
+                    End Select
+                ElseIf countCVCm(rv_txt) = 1 Then
+                    If doEndsCVC(rv_txt) Then
+                        rv_txt = rv_txt + "e"
+                    End If
+                End If
+            End Select
+        End If
+        
+        '// Step 1c
+        If substring_pos(rv_txt, -1) = "y" Then
+            If hasVowel(substring(rv_txt, "y")) Then
+                rv_txt = substring(rv_txt, "y") + "i"
+            End If
+        End If
+    End If
+    
+    '// Step 2
+    Dim i As Long
+    Dim suf2 As Variant: suf2 = Split("ational,tional,enci,anci,izer,bli,alli,entli,eli,ousli,ization,ation,ator,alism,iveness,fulness,ousness,aliti,iviti,biliti,logi", ",")
+    Dim replaceSuf2 As Variant: replaceSuf2 = Split("ate,tion,ence,ance,ize,ble,al,ent,e,ous,ize,ate,ate,al,ive,ful,ous,al,ive,ble,log", ",")
+    For i = 0 To UBound(suf2)
+        If endsin(rv_txt, "" + suf2(i)) And countCVCm(substring(rv_txt, "" + suf2(i))) > 0 Then
+            rv_txt = substring(rv_txt, "" + suf2(i)) + replaceSuf2(i)
+            Exit For
+        End If
+    Next
+    
+    '// Step 3
+    Dim suf3 As Variant: suf3 = Split("icate,ative,alize,iciti,ical,ful,ness", ",")
+    Dim replaceSuf3 As Variant: replaceSuf3 = Split("ic,,al,ic,ic,,", ",")
+    For i = 0 To UBound(suf3)
+        If endsin(rv_txt, "" + suf3(i)) And countCVCm(substring(rv_txt, "" + suf3(i))) > 0 Then
+            rv_txt = substring(rv_txt, "" + suf3(i)) + replaceSuf3(i)
+            Exit For
+        End If
+    Next
+    
+    '// Step 4
+    Dim suf4 As Variant: suf4 = Split("al,ance,ence,er,ic,able,ible,ant,ement,ment,ent,tion,sion,ou,ism,ate,iti,ous,ive,ize", ",")
+    suf = endsinArr(rv_txt, suf4)
+    If suf <> "" And countCVCm(substring(rv_txt, suf)) > 1 Then
+        rv_txt = substring(rv_txt, suf)
+    End If
+    
+    '// Step 5a
+    If endsin(rv_txt, "e") Then
+        m = countCVCm(substring(rv_txt, "e"))
+        If m > 1 Then
+            rv_txt = substring(rv_txt, "e")
+        ElseIf m = 1 Then
+            If Not doEndsCVC(substring(rv_txt, "e")) Then
+                rv_txt = substring(rv_txt, "e")
+            End If
+        End If
+    End If
+    
+    '// Step 5b
+    If countCVCm(rv_txt) > 1 Then
+        If substring_pos(rv_txt, -2) = "ll" Then
+            rv_txt = substring_pos(rv_txt, -1)
+        End If
+    End If
+    
+    stemm_EN = rv_txt
+End Function
+
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'_______PESOS_CLASIFICADOR__________________________________________________________________________________________________________________________________________________________________________________________________________________________
+'____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+' check if word is an stopword
+Public Function IsDeptWeighted(ByVal dept As String) As Boolean
+    If pesosClasificadorDict Is Nothing Then Set pesosClasificadorDict = Class_Initialize(pesosClasificador)
+    
+    ' Check if the word exists in the dictionary
+    IsDeptWeighted = pesosClasificadorDict.Exists(dept)
+End Function
+
+' Remove HTML tags from text
+Public Function doEstimateCategory(ByVal dept As String, ByVal body As String) As String
+On Error GoTo ErrHndlr
+    Dim akinator As String: akinator = "Akinator dice que este mail puede ser ......." & vbNewLine
+    
+    ' Check if we have set up for given Dept Desc/Name
+    If IsDeptWeighted(dept) Then
+        ' Get Email lang
+        Dim lang As String: lang = LCase(getLangHTML(body))
+        If lang = "" Then lang = "es"
+        ' Get text from 1º mail without html tags
+        Dim corpus As String: corpus = doPrepareText(getFirstEmailWithoutHTML(body))
+        
+        ' Get Category's Weights set up - Evaluate for each one
+        Dim categoriesWeights As Variant
+        For Each categoriesWeights In pesosClasificadorDict.item(dept).Keys
+            
+            Dim score As Integer: score = 0
+            ' Check if we have set up for given lang
+            If pesosClasificadorDict.item(dept).item(categoriesWeights).Exists(lang) Then
+                ' Get pair Word-Weight set up for a given lang
+                Dim pairWordWeights As Variant
+                For Each pairWordWeights In pesosClasificadorDict.item(dept).item(categoriesWeights).item(lang)
+                    ' Check if key is contained at email corpus
+                    If Len(corpus) > Len(Replace(corpus, pairWordWeights, "")) Then
+                        score = score + CInt(pesosClasificadorDict.item(dept).item(categoriesWeights).item(lang).item(pairWordWeights))
+                    End If
+                Next
+            End If
+            If score < 0 Then score = 0
+            If score > 0 Then doEstimateCategory = doEstimateCategory & vbNewLine & categoriesWeights & " <- " & score
+            Debug.Print categoriesWeights & " <- " & score
+        Next
+        
+    End If
+ErrHndlr:
+    If doEstimateCategory = "" Then
+        doEstimateCategory = "No existen pesos definidos en (" & dept & ") para determinar una categoría."
+    Else
+        doEstimateCategory = akinator & doEstimateCategory
+    End If
+    Set categoriesWeights = Nothing
+End Function
+

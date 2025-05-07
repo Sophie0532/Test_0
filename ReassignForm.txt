@@ -1,0 +1,98 @@
+
+
+
+
+
+
+
+'inputs
+Public token As Outlook.mailItem
+'outputs
+Public GLOBAL_CONTROL As Integer
+Public GLOBAL_USER As String   ' CONTIENE user_employee
+Public GLOBAL_USER_COD As Integer
+Public GLOBAL_USER_EMPLOYEE As String   ' CONTIENE user_employee
+Public GLOBAL_NOTES As String
+
+
+Private athena_user_list() As Variant
+
+Private Function get_cod_by_desc(arrayList() As Variant, texto As String) As String
+    cod = -1
+    If Not IsEmpty(arrayList(0)) Then
+        For Each item In arrayList
+            If (item(0) = texto) Then
+                cod = item(1)
+            End If
+        Next
+    End If
+
+    get_cod_by_desc = cod
+End Function
+
+Private Sub AceptarButton_Click()
+    GLOBAL_CONTROL = ATHENA_CONTROL_OK
+    If RealizadorComboBox.ListIndex = -1 Then
+       'Solo categoriza sin asignar
+        GLOBAL_USER = Athena_Mail_Owner_UnAssigned
+        GLOBAL_USER_EMPLOYEE = ""
+        GLOBAL_USER_COD = Athena_Mail_OwnerCod_UnAssigned
+    Else
+        GLOBAL_NOTES = NotesTextBox
+        If RealizadorComboBox = Athena_Mail_Owner_UnAssigned Then
+            GLOBAL_USER = Athena_Mail_Owner_UnAssigned
+            GLOBAL_USER_COD = Athena_Mail_OwnerCod_UnAssigned
+            GLOBAL_USER_EMPLOYEE = Athena_Mail_Owner_UnAssigned
+        Else
+            GLOBAL_USER = RealizadorComboBox
+            GLOBAL_USER_COD = get_cod_by_desc(athena_user_list, RealizadorComboBox)
+            GLOBAL_USER_EMPLOYEE = getUserEmployee("" & GLOBAL_USER_COD)
+        End If
+    End If
+
+    cierraFormulario
+End Sub
+
+Private Sub CancelarButton_Click()
+    GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
+    GLOBAL_USER = ""
+    GLOBAL_USER_COD = -1
+    GLOBAL_USER_EMPLOYEE = ""
+    NotesTextBox = ""
+    cierraFormulario
+End Sub
+
+Private Sub cierraFormulario()
+    Me.Hide
+End Sub
+
+Private Sub NotesTextBox_Change()
+
+End Sub
+
+Private Sub ReassignFrame_Click()
+
+End Sub
+
+Private Sub UserForm_Activate()
+
+    'colocamos la ventana en la esquina superior izquierda
+    StartUpPosition = 0
+    Left = 0
+    Top = 0
+
+    Dim query As String
+    'query = ATHENA_GET_QUERY_GET_USER(Athena_cToken.Athena_Token_get_AreaDept(Me.token))
+    query = ATHENA_GET_QUERY_GET_USER_BY_COD(Athena_cToken.Athena_Token_get_AreaDeptCod(Me.token))
+    athena_user_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    RealizadorComboBox.Clear
+    If IsEmpty(athena_user_list(0)) Then
+       RealizadorComboBox.AddItem info_not_found_err
+    Else
+       
+       RealizadorComboBox.AddItem Athena_Mail_Owner_UnAssigned
+       For Each item In athena_user_list
+           RealizadorComboBox.AddItem item(0)
+       Next item
+    End If
+End Sub

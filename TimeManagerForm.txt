@@ -1,0 +1,487 @@
+
+
+
+
+Option Explicit
+
+Public token As mailItem
+Public json As Dictionary
+Public jsonEvent As Variant
+Public ddbb_data_f As String
+Private athena_user_list() As Variant
+Private DutyCod As String
+
+Private replacementSel As Integer
+Private traceInit() As String   ' Inicio - StringVar (5) Estado / Cuando / Es Ajuste / Ignorar / Cuando
+Private traceEnd() As String    ' Fin - StringVar (5) Estado / Cuando / Es Ajuste / Ignorar / Cuando
+
+Private Sub Listado()
+    init
+    getTimeTrace
+    'SetFieldsRow
+    'get_cod_by_desc
+    'Load_RealizadorComboBox
+    ValidateInputInfo
+    ValidateDateInRange
+    oculta_boton_rango
+    muestra_boton_rango
+    
+    'TraceListBox_DblClick
+    
+    NuevoButton_Click
+    BorrarButton_Click
+    ActualizartButton_Click
+    CancelarButton_Click
+    
+    AcceptButton_Click
+    UserForm_Activate
+    UserForm_Terminate
+    cierraFormulario
+End Sub
+
+Private Sub InfoTokenFrame_Click()
+
+End Sub
+
+Private Sub LabelAsunto_Click()
+
+End Sub
+
+'Private Sub UserForm_Deactivate()
+'    Call AcceptButton_Click
+'End Sub
+
+Private Sub UserForm_Terminate()
+    Call AcceptButton_Click
+End Sub
+
+Private Sub AcceptButton_Click()
+    If Not Me.token Is Nothing Then
+        Call cierraFormulario
+    Else
+        Me.Hide
+    End If
+End Sub
+
+Private Sub cierraFormulario()
+    If Athena_Token_get_Synchronized(Me.token) = "N" Then 'And MsgBox("Desea sincronizar los cambios. ¿Está seguro?", vbYesNo) = vbYes Then
+        Dim result As Boolean: result = Athena_Token_push(Me.token)
+        If result Then
+            MsgBox "Actualizado!"
+        Else
+            MsgBox "ATENCIÓN!, Algo fue mal, sincronize más tarde para guardar los cambios en BBDD.", vbCritical
+        End If
+    End If
+    Me.Hide
+End Sub
+
+Private Function ValidateInputInfo() As String
+    Dim msgError As String
+    ''''''''''''''FECHAS'''''''''''''''''
+    ' Fecha Inicio Valida
+    If Not esFechaValida(InicioTextBox.text) Then
+        msgError = msgError & vbNewLine & " *  Introduzaca una FECHA INICIO valida. " & Athena_FullTime_Pattern
+    End If
+    ' Fecha Fin valida
+    If Not esFechaValida(FinTextBox.text) Then
+        msgError = msgError & vbNewLine & " * Introduzaca una FECHA FIN valida. " & Athena_FullTime_Pattern
+    End If
+    ' Entre ellas
+    If msgError = "" Then
+        If CDate(InicioTextBox.text) >= CDate(FinTextBox.text) Then msgError = msgError & vbNewLine & " * La FECHA INICIO debe ser anterior a la FECHA FIN. " & Athena_FullTime_Pattern
+    End If
+    ' Fechas futuras
+    If msgError = "" Then
+        If CDate(InicioTextBox.text) >= Now() Then msgError = msgError & vbNewLine & " * La FECHA INICIO no puede ser a futuro. " & Athena_FullTime_Pattern
+        If CDate(FinTextBox.text) >= Now() Then msgError = msgError & vbNewLine & " * La FECHA FIN no puede ser a futuro. " & Athena_FullTime_Pattern
+    End If
+    ''''''''''''''RESPONSABLE'''''''''''''''''
+    ' Owner
+    If RealizadorComboBox.ListIndex = -1 Or RealizadorComboBox = "" Then ' Invalid pointer
+        msgError = msgError & vbNewLine & " * Indique el REALIZADOR del tiempo. "
+    End If
+    ValidateInputInfo = msgError
+    
+End Function
+
+Private Function ValidateDateInRange() As String
+    ' Respecto a lo ya registrado
+    Dim i As Integer: i = 0
+    Dim txtarr() As String
+    Dim rango_Valido As Boolean: rango_Valido = True
+    Dim msg_fecha As String: msg_fecha = ""
+    
+    ' Check over existing rows
+    Do While i < Me.TraceListBox.ListCount And replacementSel < 0 And rango_Valido
+        ' Ignore row to replace
+        If replacementSel <> i Then
+            ' Read Row
+            txtarr = VBA.Split(Me.TraceListBox.List(i, 0), " | ")
+            
+            ' Inicio_Nuevo < Rango(i).inicio ? => [**New**] <-- [**RangeX**]
+            If CDate(InicioTextBox.text) < CDate(txtarr(0)) Then
+                
+                ' Fin > Rang(i).inicio  => [**New[**]RangeX**]
+                If CDate(FinTextBox.text) > CDate(txtarr(0)) Then
+                    rango_Valido = False
+                    msg_fecha = "Rango fecha introducido solapado con el rango " & (i + 1) & " ... " & txtarr(0) & " - " & txtarr(0)
+                End If
+                
+            ' Inicio >= Rango(i).inicio y
+            '   Inicio < Rango(i).fin ? => [**RangeX[**]Inicio**] / [**Ran[**Inicio**]geX**]
+            ElseIf CDate(InicioTextBox.text) < CDate(txtarr(1)) Then
+                rango_Valido = False
+                ' Fin <= Rang(i).fin
+                If CDate(FinTextBox.text) <= CDate(txtarr(1)) Then
+                    msg_fecha = "Rango fecha introducido contenido en el rango " & (i + 1) & " ... " & txtarr(0) & " - " & txtarr(0)
+                Else
+                    msg_fecha = "Rango fecha introducido solapado con en el rango " & (i + 1) & " ... " & txtarr(0) & " - " & txtarr(0)
+                End If
+                
+            ' Last Range and input is greater => [**LastX**] --> [**New**]
+            ElseIf i = Me.TraceListBox.ListCount - 1 Then
+                rango_Valido = False
+                msg_fecha = "Rango de fecha introducido sobrepasa el último rango de fecha " & (i + 1) & " ... " & txtarr(0) & " - " & txtarr(0)
+            End If
+        End If
+        ' Next Row
+        i = i + 1
+    Loop
+    ValidateDateInRange = msg_fecha
+End Function
+
+Private Sub ActualizartButton_Click()
+    Dim msgError As String: msgError = ValidateInputInfo
+    Dim traceStr As String
+    
+    If msgError <> "" Then
+        MsgBox msgError
+    Else
+        ' Respecto a lo ya registrado
+        Dim msg_fecha As String: msg_fecha = ValidateDateInRange
+        
+        If msg_fecha = "" Then
+            'traceStr = Format(CalcTime(InicioTextBox.text, FinTextBox.text), "#,##0.00") & " min"
+            traceStr = convertTime(CalcTime(InicioTextBox.text, FinTextBox.text))
+            If MsgBox("Quiere " & LCase(Me.ActualizartButton.Caption) & ":" & vbNewLine & vbNewLine & vbTab & InicioTextBox.text & vbNewLine & vbTab & FinTextBox.text & vbNewLine & vbTab & " " & vbNewLine & vbTab & " " & vbNewLine & vbTab & " >>>>>>>>>>>>>>>>>  " & traceStr, vbQuestion + vbYesNo + vbDefaultButton2, "Add Time " & traceStr) = vbYes Then
+                Dim when As String
+                Dim who As String
+                
+                when = Format(Now, Athena_FullTime_Pattern)
+                who = getUserEmployee(get_cod_by_desc(athena_user_list, RealizadorComboBox)) 'getUserLogin
+                
+                If replacementSel = -1 Then
+                    ' Añadir tramo en el JSON
+                    Athena_Token_Include_Event_JSON Me.token, InicioTextBox.text, FinTextBox.text, who, when
+                Else
+                    ' Actualizar tramos en el JSON
+                    If traceInit(1) <> InicioTextBox Then Athena_Token_Replace_Event_JSON Me.token, VBA.Trim(InicioTextBox.text), traceInit(1), when
+                    If traceEnd(1) <> FinTextBox Then Athena_Token_Replace_Event_JSON Me.token, VBA.Trim(FinTextBox.text), traceEnd(1), when
+                End If
+                
+                ' Refresh
+                init
+            End If
+        Else
+            MsgBox msg_fecha, vbExclamation, "Rango no valido"
+        End If
+    End If
+End Sub
+
+Private Sub BorrarButton_Click()
+    Dim txtarr() As String
+    Dim traceStr As String
+    
+    If Me.TraceListBox.ListIndex > -1 Then
+        txtarr = VBA.Split(Me.TraceListBox, " | ")
+        'traceStr = Format(CalcTime(VBA.Trim(txtarr(0)), VBA.Trim(txtarr(1))), "#,##0.00") & " min"
+        traceStr = convertTime(CalcTime(VBA.Trim(txtarr(0)), VBA.Trim(txtarr(1))))
+        If Me.TraceListBox.ListIndex = (Me.TraceListBox.ListCount - 1) Then
+            MsgBox "No puede descartar el último rango, pruebe sino a cambiar las fechas"
+        ElseIf MsgBox("Quieres descartar el tramo:" & vbNewLine & vbNewLine & vbTab & VBA.Trim(txtarr(0)) & vbNewLine & vbTab & VBA.Trim(txtarr(1)) & vbNewLine & vbTab & " " & vbNewLine & vbTab & " " & vbNewLine & vbTab & " >>>>>>>>>>>>>>>>> " & traceStr, vbQuestion + vbYesNo + vbDefaultButton2, "Delete Time " & traceStr) = vbYes Then
+            'traceInit = StringArray(VBA.Trim(txtarr(3)), VBA.Trim(txtarr(0)), "AJUSTE", "", VBA.Trim(txtarr(5)), VBA.Trim(txtarr(7)))
+            'traceEnd = StringArray(VBA.Trim(txtarr(4)), VBA.Trim(txtarr(1)), "AJUSTE", "", VBA.Trim(txtarr(6)), VBA.Trim(txtarr(7)))
+            ' Actuzalizar el JSON
+            Athena_Token_Discard_Event_JSON Me.token, VBA.Trim(txtarr(0)), VBA.Trim(txtarr(1)), VBA.Trim(txtarr(3)), VBA.Trim(txtarr(4))
+            ' Refresh Form
+            init
+        End If
+    End If
+End Sub
+
+Private Sub CancelarButton_Click()
+    oculta_boton_rango
+End Sub
+
+Private Sub Load_RealizadorComboBox(usr As String)
+    Dim item As Variant
+    RealizadorComboBox.Clear
+    'athena_user_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_USER(Athena_cToken.Athena_Token_get_AreaDept(Me.token)), verbose)
+    athena_user_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_USER_BY_COD(Athena_cToken.Athena_Token_get_AreaDeptCod(Me.token)), verbose)
+    If IsEmpty(athena_user_list(0)) Then
+       RealizadorComboBox.AddItem info_not_found_err
+    Else
+       For Each item In athena_user_list
+           RealizadorComboBox.AddItem item(0)
+           If item(2) = usr Then RealizadorComboBox = item(0)
+       Next item
+    End If
+End Sub
+
+Private Sub NuevoButton_Click()
+    muestra_boton_rango False
+End Sub
+
+Private Sub TraceListBox_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+    Dim txtarr() As String
+    
+    ' Rows > 0
+    If Me.TraceListBox.ListIndex > -1 Then
+        replacementSel = Me.TraceListBox.ListIndex
+        
+        txtarr = VBA.Split(TraceListBox, " | ")
+        If (UBound(txtarr) > 0) Then
+            traceInit = StringArray(VBA.Trim(txtarr(3)), VBA.Trim(txtarr(0)), "AJUSTE", "", VBA.Trim(txtarr(5)), VBA.Trim(txtarr(7)))
+            traceEnd = StringArray(VBA.Trim(txtarr(4)), VBA.Trim(txtarr(1)), "AJUSTE", "", VBA.Trim(txtarr(6)), VBA.Trim(txtarr(7)))
+            
+            ' Check if selection has an ended status
+            If esFechaValida(VBA.Trim(txtarr(1))) Then
+                muestra_boton_rango True
+            Else
+                MsgBox "Rango seleccionado sin marca de fin, no ajustable"
+                oculta_boton_rango
+            End If
+        End If
+    Else
+        MsgBox "No hay tramos para editar"
+        oculta_boton_rango
+    End If
+End Sub
+
+Private Sub oculta_boton_rango()
+    AjusteTiempoFrame.Visible = False
+    
+    replacementSel = -1
+    
+    InicioTextBox.text = ""
+    FinTextBox.text = ""
+    
+    traceInit = StringArray("", "", "", "", "", "")
+    traceEnd = StringArray("", "", "", "", "", "")
+    
+    RealizadorLabel.Enabled = False
+    'RealizadorLabel.Visible = False
+    RealizadorComboBox.Visible = False
+    
+    NuevoButton.Enabled = True
+    BorrarButton.Enabled = True
+    
+    CancelarButton.Enabled = False
+    CancelarButton.Visible = False
+    ActualizartButton.Enabled = False
+    ActualizartButton.Visible = False
+End Sub
+
+Private Sub muestra_boton_rango(Optional sustituir As Boolean = False)
+    
+    If sustituir Then
+        ActualizartButton.Caption = "Sustituir Tramo"
+        
+        InicioTextBox.text = VBA.Trim(traceInit(1))
+        FinTextBox.text = VBA.Trim(traceEnd(1))
+        
+        Load_RealizadorComboBox LCase(VBA.Trim(traceInit(4)))
+        RealizadorComboBox.Enabled = False
+        
+        'RealizadorLabel.Visible = False
+        RealizadorComboBox.Visible = False
+    Else
+        ActualizartButton.Caption = "Añadir Tramo"
+        
+        InicioTextBox.text = Format(Now, Athena_FullTime_Pattern)
+        FinTextBox.text = InicioTextBox.text
+    
+        traceInit = StringArray("", "", "AJUSTE", "", "", "")
+        traceEnd = StringArray("", "", "AJUSTE", "", "", "")
+    
+        Load_RealizadorComboBox getUserLogin
+        RealizadorComboBox.Enabled = True
+        
+        'RealizadorLabel.Visible = True
+        RealizadorComboBox.Visible = True
+    End If
+
+    NuevoButton.Enabled = False
+    BorrarButton.Enabled = False
+    
+    RealizadorComboBox.Visible = True
+    
+    CancelarButton.Enabled = True
+    CancelarButton.Visible = True
+    ActualizartButton.Enabled = True
+    ActualizartButton.Visible = True
+    
+    AjusteTiempoFrame.Visible = True
+End Sub
+
+Private Sub init()
+    'colocamos la ventana en la esquina superior izquierda
+    StartUpPosition = 0
+    Left = 0
+    Top = 0
+    replacementSel = -1
+    
+    TraceListBox.Clear
+    RealizadorComboBox.Clear
+    
+    traceInit = StringArray("", "", "", "", "", "")
+    traceEnd = StringArray("", "", "", "", "", "")
+    
+    oculta_boton_rango
+    
+    If Not Me.token Is Nothing Then
+        Set json = Athena_cJSON.ParseJson(Me.token.body)
+        DutyCod = json("taskid")
+        Me.LabelAsunto = json("title")
+        Me.LabelID = json("taskid")
+        
+        'jsonEvent = Athena_Token_get_Events_JSON(Me.token, "events")
+        jsonEvent = Athena_Token_read_Events_JSON(json(TOKEN_EVENTS_STATUS))
+        getTimeTrace
+        
+        replacementSel = -1
+        NuevoButton.Enabled = True
+        BorrarButton.Enabled = True
+    Else
+        NuevoButton.Enabled = False
+        BorrarButton.Enabled = False
+    End If
+End Sub
+
+Private Sub UserForm_Activate()
+    init
+    
+    'query = ATHENA_GET_QUERY_GET_AREA_DEPT(GLOBAL_MAILBOX)
+    'athena_area_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    'If IsEmpty(athena_area_list(0)) Then
+    '    SistemaComboBox.AddItem info_not_found_err
+    'End If
+End Sub
+
+Private Function getTimeTrace() As Variant
+
+    ' Read existing
+    If Not token Is Nothing Then
+        Dim rowCount As Integer
+        Dim i As Variant
+        Dim prev_row As Variant
+        Dim row As String
+        Dim direction As Integer: direction = -1
+        Dim total As Double: total = 0
+        Dim stamp As String
+        Dim statN As String
+        Dim stampN As String
+        Dim who As String
+        Dim trace_t As Double
+        
+        ' Por cada entrada en el JSON
+        For rowCount = 0 To UBound(jsonEvent)
+            If VariantSize(jsonEvent(rowCount)) > 0 Then
+                If VariantSize(jsonEvent(rowCount)) < 3 Or jsonEvent(rowCount)(3) = "" Then
+                    ' Recoger marcas
+                    statN = jsonEvent(rowCount)(0)
+                    stampN = jsonEvent(rowCount)(1)
+                    'Evento de Inicio
+                    If Athena_isTokenEvent_Status_Start(statN) Then
+                        Select Case direction
+                            Case -1:
+                                direction = 1
+                                stamp = stampN
+                                prev_row = jsonEvent(rowCount)
+                            Case 0: ' Cerrar marca
+                                direction = 1
+                                stamp = stampN
+                                prev_row = jsonEvent(rowCount)
+                            Case 1: ' Error
+                        End Select
+                    'Evento de Parada
+                    Else
+                        Select Case direction
+                            Case -1: ' 1º registro >> IGNORA
+                            Case 0:  ' PAUSA + PAUSA => IGNORAR
+                            Case 1:  ' Cerrar marca
+                                direction = 0
+                                trace_t = CalcTime(stamp, stampN)
+                                total = total + trace_t
+                                TraceListBox.AddItem SetFieldsRow(jsonEvent(rowCount), prev_row) '"" & stamp & vbTab & "... " & vbTab & stampN & vbTab & "...... " & Format(trace_t, "#,##0.00")
+                                If verbose Then Debug.Print "" & stamp & vbTab & "... " & vbTab & stampN & vbTab & "...... " & Format(trace_t, "#,##0.00")
+                        End Select
+                    End If
+                End If
+            End If
+        Next
+        
+        ' Si ha habido eventos y el último leído fue de Inicio...
+        If direction = 1 Then
+            trace_t = CalcTime(stamp, "")
+            total = total + trace_t
+            TraceListBox.AddItem SetFieldsRow(Null, prev_row)  '"" & stamp & vbTab & "... " & vbTab & stampN & vbTab & "...... " & Format(trace_t, "#,##0.00")
+            If verbose Then Debug.Print "" & stamp & vbTab & "... " & vbTab & stampN & vbTab & "...... " & Format(trace_t, "#,##0.00")
+        End If
+        'Me.LabelTotal = total
+        Me.LabelTotal = convertTime(total)
+        
+        'jsonDict("events") = Athena_Token_Add_Event_JSON(jsonEvent, duty_status)
+    End If
+End Function
+
+Private Function SetFieldsRow(row As Variant, prev_row As Variant) As String
+    Dim trace_t As String
+    Dim adj As String
+    Dim rowList As String
+    
+    If IsNull(row) Or VariantSize(row) = 0 Then
+        Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
+        'trace_t = CalcTime(prev_row.item(EVENTO_JSON_STAMP), "")
+        'rowList = "" & prev_row.item(EVENTO_JSON_STAMP) & " |                                    | " & Format(Format(trace_t, "#,##0.00"), "@@@@@@@@@") & " | " & Format(prev_row.item(EVENTO_JSON_STATUS), "@@@@@@@@@@@@") & " | " & Format("...", "@@@@@@@@@@@@@@@@@@@")
+        trace_t = CalcTime("" & prev_row(0), "")
+        rowList = "" & prev_row(1) & " |                                    | " & Format(Format(trace_t, "#,##0.00"), "@@@@@@@@@") & " | " & Format(prev_row(0), "@@@@@@@@@@@@") & " | " & Format("...", "@@@@@@@@@@@@@@@@@@@")
+        'If prev_row.Count() >= 3 Then
+'            If prev_row.item(EVENTO_JSON_ADJUST) <> "" Then adj = "Ajustado"
+'            rowList = rowList & " | " & Format(prev_row.item(EVENTO_JSON_WHO), "@@@@@@@@") & " | " & Format("", "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+'        Else
+'            rowList = rowList & " | " & Format("", "@@@@@@@@") & " | " & Format("", "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+'        End If
+        If VariantSize(prev_row) >= 3 Then
+            If prev_row(2) <> "" Then adj = "Ajustado"
+            rowList = rowList & " | " & Format(prev_row(4), "@@@@@@@@") & " | " & Format("", "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+        Else
+            rowList = rowList & " | " & Format("", "@@@@@@@@") & " | " & Format("", "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+        End If
+    Else
+        trace_t = CalcTime("" & prev_row(1), "" & row(1))
+        rowList = "" & prev_row(1) & " | " & row(1) & " | " & Format(Format(trace_t, "#,##0.00"), "@@@@@@@@@") & " | " & Format(prev_row(0), "@@@@@@@@@@@@") & " | " & Format(row(0), "@@@@@@@@@@@@")
+        If (UBound(prev_row) >= 3 And UBound(row) >= 3) Then
+            If (prev_row(2) <> "" Or row(2) <> "") Then adj = "Ajustado"
+            rowList = rowList & " | " & Format(prev_row(4), "@@@@@@@@") & " | " & Format(row(4), "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+        Else
+            rowList = rowList & " | " & Format("", "@@@@@@@@") & " | " & Format("", "@@@@@@@@") & " | " & Format(adj, "@@@@@@@@")
+        End If
+    End If
+    SetFieldsRow = rowList
+End Function
+
+
+Private Function get_cod_by_desc(arrayList() As Variant, texto As String) As String
+    Dim cod As Integer: cod = -1
+    Dim item As Variant
+    If Not IsEmpty(arrayList(0)) Then
+        For Each item In arrayList
+            If (item(0) = texto) Then
+                cod = item(1)
+            End If
+        Next
+    End If
+
+    get_cod_by_desc = cod
+End Function

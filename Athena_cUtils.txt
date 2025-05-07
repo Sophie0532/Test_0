@@ -1,0 +1,1003 @@
+
+''''''''''''''''''''''''''
+''' PORTAPAPELES
+''''''''''''''''''''''''''
+#If Mac Then
+    ' do nothing
+#Else
+    #If VBA7 Then
+        Declare PtrSafe Function GlobalUnlock Lib "kernel32" (ByVal hMem As LongPtr) As LongPtr
+        Declare PtrSafe Function GlobalLock Lib "kernel32" (ByVal hMem As LongPtr) As LongPtr
+        Declare PtrSafe Function GlobalAlloc Lib "kernel32" (ByVal wFlags As Long, ByVal dwBytes As LongPtr) As LongPtr
+        Declare PtrSafe Function CloseClipboard Lib "User32" () As Long
+        Declare PtrSafe Function OpenClipboard Lib "User32" (ByVal hwnd As LongPtr) As LongPtr
+        Declare PtrSafe Function EmptyClipboard Lib "User32" () As Long
+        Declare PtrSafe Function lstrcpy Lib "kernel32" (ByVal lpString1 As Any, ByVal lpString2 As Any) As LongPtr
+        Declare PtrSafe Function SetClipboardData Lib "User32" (ByVal wFormat As Long, ByVal hMem As LongPtr) As LongPtr
+    #Else
+        Declare Function GlobalUnlock Lib "kernel32" (ByVal hMem As Long) As Long
+        Declare Function GlobalLock Lib "kernel32" (ByVal hMem As Long) As Long
+        Declare Function GlobalAlloc Lib "kernel32" (ByVal wFlags As Long, ByVal dwBytes As Long) As Long
+        Declare Function CloseClipboard Lib "User32" () As Long
+        Declare Function OpenClipboard Lib "User32" (ByVal hwnd As Long) As Long
+        Declare Function EmptyClipboard Lib "User32" () As Long
+        Declare Function lstrcpy Lib "kernel32" (ByVal lpString1 As Any, ByVal lpString2 As Any) As Long
+        Declare Function SetClipboardData Lib "User32" (ByVal wFormat As Long, ByVal hMem As Long) As Long
+    #End If
+#End If
+Public Const GHND = &H42
+Public Const CF_TEXT = 1
+Public Const MAXSIZE = 4096
+
+Sub ClipBoard_SetData(MyString As String)
+    #If Mac Then
+        With New MSForms.dataObject
+            .SetText MyString
+            .PutInClipboard
+        End With
+    #Else
+        #If VBA7 Then
+            Dim hGlobalMemory As LongPtr
+            Dim hClipMemory   As LongPtr
+            Dim lpGlobalMemory    As LongPtr
+        #Else
+            Dim hGlobalMemory As Long
+            Dim hClipMemory   As Long
+            Dim lpGlobalMemory    As Long
+        #End If
+
+        Dim x                 As Long
+
+        ' Allocate moveable global memory.
+        '-------------------------------------------
+        hGlobalMemory = GlobalAlloc(GHND, Len(MyString) + 1)
+
+        ' Lock the block to get a far pointer
+        ' to this memory.
+        lpGlobalMemory = GlobalLock(hGlobalMemory)
+
+        ' Copy the string to this global memory.
+        lpGlobalMemory = lstrcpy(lpGlobalMemory, MyString)
+
+        ' Unlock the memory.
+        If GlobalUnlock(hGlobalMemory) <> 0 Then
+            MsgBox "Could not unlock memory location. Copy aborted."
+            GoTo PrepareToClose
+        End If
+
+        ' Open the Clipboard to copy data to.
+        If OpenClipboard(0&) = 0 Then
+            MsgBox "Could not open the Clipboard. Copy aborted."
+            Exit Sub
+        End If
+
+        ' Clear the Clipboard.
+        x = EmptyClipboard()
+
+        ' Copy the data to the Clipboard.
+        hClipMemory = SetClipboardData(CF_TEXT, hGlobalMemory)
+
+PrepareToClose:
+        If CloseClipboard() = 0 Then
+            MsgBox "Could not close Clipboard."
+        End If
+    #End If
+End Sub
+
+''''''''''''''''''''''''''
+''' ID's
+''''''''''''''''''''''''''
+Public Function getUserLogin() As String
+    getUserLogin = LCase(VBA.Interaction.Environ$("UserName"))
+End Function
+
+Public Function getIdDuty() As String
+    ' User Id
+    Dim usr As String: usr = getUserLogin()
+    
+    ' Por si Int/Ext con mismo id
+    Select Case Left(usr, 1)
+    Case "n"
+        usr = "1" & Format(Right(usr, Len(usr) - 1), "00000000")
+    Case "x"
+        usr = "2" & Format(Right(usr, Len(usr) - 1), "00000000")
+    Case Else
+        usr = "3" & Format(Right(usr, Len(usr) - 1), "00000000")
+    End Select
+    
+    ' Int/Ext + User Id (nº) + TimeStamp_millisec
+    getIdDuty = usr & "00" & timeStampNow
+End Function
+
+''' MODELO DATOS ==> Tabla Buzones para generar ID (FK) a las tablas de configuración de parámetros a cargar por buzón
+
+
+''' meter en Varian el buzón
+''' * utilizar el ID del buzón
+
+Public Function list_Email_Account_Mapped() As String
+On Error GoTo ErrHandle
+    Dim accountList As String
+    Dim sqlStrng As String
+    Dim i As Long
+    Dim j As Long
+    
+    accountList = "Accounts mapped:"
+    For i = 1 To Application.Session.Accounts.Count
+        sqlStrng = " '" & Application.Session.Accounts.item(i).SmtpAddress & "'"
+    Next i
+    Debug.Print sqlStrng
+    
+    For i = 1 To Application.Session.Folders.Count
+        Debug.Print Application.Session.Folders.item(i).FolderPath & vbTab & Application.Session.Folders.item(i).EntryId
+        For j = 1 To Application.Session.Folders.item(i).Folders.Count
+            Debug.Print vbTab & Application.Session.Folders.item(i).Folders.item(j).FolderPath & vbTab & Application.Session.Folders.item(i).Folders.item(j).EntryId
+        Next j
+    Next i
+ErrHandle:
+    ' Reset & free
+    If Err Then MsgBox Err.Number & " " & Err.Description
+End Function
+
+''''''''''''''''''''''''''
+''' OUTLOOK
+''''''''''''''''''''''''''
+Public Function CheckExchangeStatus() As Integer
+    'olNoExchange 0
+    'olOffline 100
+    'olCachedOffline 200
+    'olDisconnected 300
+    'olCachedDisconnected 400
+    'olCachedConnectedHeaders 500
+    'olCachedConnectedDrizzle 600
+    'olCachedConnectedFull 700
+    'olOnline 800
+    CheckExchangeStatus = CInt("" & Outlook.Application.GetNamespace("MAPI").ExchangeConnectionMode)
+End Function
+
+''''''''''''''''''''''''''
+''' LOGGER
+''''''''''''''''''''''''''
+Public Sub Traza(level As LogLEVEL, sLogText As String, Optional slogpoint As String)
+On Error GoTo ErrHndlr
+    If myLogger Is Nothing Then initLog
+    Call myLogger.log(sLogText, level, slogpoint)
+ErrHndlr:
+    If Err Then MsgBox "Error traza log. " & vbNewLine & Err
+End Sub
+
+''''''''''''''''''''''''''
+''' Folders Management
+''''''''''''''''''''''''''
+Public Function getPlannFolders() As Outlook.Folder
+On Error Resume Next
+    Dim inboxFolder As Outlook.Folder
+    Set inboxFolder = Get_Inbox_Folder(Application.ActiveExplorer.currentFolder)
+    If inboxFolder.Folders.item(Athena_Folder_Plann) Is Nothing Then inboxFolder.Folders.Add Athena_Folder_Plann, olFolderInbox
+    Set inboxFolder = inboxFolder.Folders.item(Athena_Folder_Plann)
+    If inboxFolder.Folders.item(Athena_FolderSub_Plann) Is Nothing Then inboxFolder.Folders.Add Athena_FolderSub_Plann, olFolderInbox
+    Set getPlannFolders = inboxFolder.Folders.item(Athena_FolderSub_Plann)
+ErrHndlr:
+    Set inboxFolder = Nothing
+End Function
+
+
+Public Function Get_Draft_Folder(ByVal currentFolder As Outlook.MAPIFolder) As Outlook.MAPIFolder
+    Set Get_Draft_Folder = Get_Folder_By_Type(currentFolder, olFolderDrafts)
+End Function
+
+Public Function Get_Inbox_Folder(ByVal currentFolder As Outlook.MAPIFolder) As Outlook.MAPIFolder
+    Set Get_Inbox_Folder = Get_Folder_By_Type(currentFolder, olFolderInbox)
+End Function
+
+Private Function Get_Folder_By_Type(ByVal currentFolder As Outlook.MAPIFolder, folderId As Long) As Outlook.MAPIFolder
+On Error GoTo ErrHndlr:
+    Dim draftFolder As Outlook.MAPIFolder
+    
+    ' Look for root folder from a given folder by param
+    Set draftFolder = currentFolder
+    While Not (draftFolder.Parent Is Nothing) And (draftFolder.Parent.Class <> 1)
+        Set draftFolder = draftFolder.Parent
+    Wend
+    
+    ' Look for required general folder type (Inbox, Sent, Draft) taking it desc/name checking its name on the defaultFolder sibling
+    Set draftFolder = draftFolder.Store.GetDefaultFolder(6)
+    
+ErrHndlr:
+    If Err Then
+        Set draftFolder = Nothing
+    End If
+    Set Get_Folder_By_Type = draftFolder
+End Function
+
+''''''''''''''''''''''''''
+''' MailItem Management
+''''''''''''''''''''''''''
+Public Function Get_Email_By_Param_At_Folder(ByVal paramID, ByVal paramValue, ByVal atFolder As Outlook.MAPIFolder, Optional sortAsc As Boolean = True) As Outlook.mailItem
+On Error GoTo ErrHndlr
+    
+    Dim olFldrItms As Object
+    Dim objResItems As Outlook.items
+    Dim objMail As Object
+    
+    Set olFldrItms = atFolder.items
+    Set objResItems = olFldrItms.Restrict("[" & paramID & "] = '" & paramValue & "'")
+    'True to sort in descending order. The default value is False (ascending).
+    objResItems.Sort "[CreationTime]", sortAsc
+    
+    Dim draftFound As Boolean
+    Dim indice As Integer
+    indice = 1
+    draftFound = False
+
+    While Not draftFound And indice <= objResItems.Count
+        If Athena_isTokenType(objResItems.item(indice)) Then
+            draftFound = True
+            Set objMail = objResItems.item(indice)
+        Else
+            indice = indice + 1
+        End If
+    Wend
+
+ErrHndlr:
+    If Err Then
+        Set objMail = Nothing
+    End If
+    
+    Set Get_Email_By_Param_At_Folder = objMail
+    
+    Set objMail = Nothing
+    Set objResItems = Nothing
+    Set olFldrItms = Nothing
+End Function
+
+Public Function doMoveToken(ByRef token As Outlook.mailItem, ByRef inboxFolder As Outlook.Folder) As Outlook.mailItem
+On Error GoTo ErrHndlr
+    Set doMoveToken = token.Move(inboxFolder)
+ErrHndlr:
+    Set doMoveToken = token
+End Function
+
+Public Sub Athena_Mail_set_desc(ByRef token As Outlook.mailItem, desc As String)
+    If desc <> "" Then token.BCC = desc
+End Sub
+
+Public Sub Athena_Mail_set_conversation(ByRef token As Outlook.mailItem, ConversationTopic As String, ConversationIndex As Variant)
+    'If token.ConversationTopic <> ConversationTopic Then
+        token.PropertyAccessor.SetProperty PR_CONVERSATION_TOPIC, ConversationTopic
+        token.PropertyAccessor.SetProperty PR_CONVERSATION_INDEX, ConversationIndex
+        token.Save
+    'End If
+End Sub
+
+' set up icon
+Public Sub Do_Change_Token_Icon(ByRef token As Outlook.mailItem, status_cod As Long)
+    Call token.PropertyAccessor.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x10800003", status_cod)
+    token.Save
+End Sub
+
+Public Function getItemSelected() As Object
+    Set getItemSelected = Nothing
+    If initUserPath = -1 Then Exit Function
+
+    ' Something is selected
+    If Application.ActiveExplorer.Selection.Count = 1 Then Set getItemSelected = Outlook.Application.ActiveExplorer.Selection.item(1)
+End Function
+
+Public Sub ExportModule(ExportPath As String)
+    Dim olApp As Outlook.Application
+    Dim olNameSpace As Object
+    Dim olProject As Object
+    Dim olDoc As Object
+    Dim strFilePath As String
+    Set olApp = Outlook.Application
+    Set olNameSpace = olApp.GetNamespace("MAPI")
+    Set olProject = olNameSpace.Folders.item(3)
+    '.GetDefaultFolder("DevTools")
+    
+    
+    Set olProject = Nothing
+    Set olNameSpace = Nothing
+    Set olApp = Nothing
+End Sub
+
+''''''''''''''''''''''''''
+''' Arrays
+''''''''''''''''''''''''''
+Public Function StringArray(ParamArray ArgList())
+    Dim i As Long
+    ReDim tempArray(UBound(ArgList)) As String
+    For i = 0 To UBound(ArgList)
+        tempArray(i) = ArgList(i)
+    Next
+    StringArray = tempArray
+
+End Function
+
+Function IsInArray(stringToBeFound As String, arr As Variant) As Boolean
+  IsInArray = (UBound(Filter(arr, stringToBeFound)) > -1)
+End Function
+
+Function VariantSize(v As Variant) As Long
+On Error GoTo ErrHndlr
+    Dim s As Long
+    Dim i As Long
+    s = 0
+    If Not IsEmpty(v) And UBound(v) >= 0 Then
+        For i = 0 To UBound(v)
+            If Not IsEmpty(v(i)) Then
+                s = s + 1
+            End If
+        Next
+    End If
+ErrHndlr:
+    VariantSize = s
+End Function
+
+Function VariantDictSize(jsonEvent As Variant) As Long
+On Error GoTo ErrHndlr
+    Dim s As Long: s = 0
+    ' VarType(jsonEvent) >> 9 >> Variant/Object/Collection
+    '       VarType(jsonEvent(1)) >> 1 >> Null
+    ' VarType(jsonEvent) >> 8204 >> Variant/Variant
+    If Not IsEmpty(jsonEvent) Then
+        If VarType(jsonEvent) = 9 Then If VarType(jsonEvent(1)) <> 1 Then s = jsonEvent.Count
+        If VarType(jsonEvent) = 8204 Then
+            Dim rowCount As Integer
+            Dim emptyRows As Integer: emptyRows = 0
+            s = UBound(jsonEvent) - LBound(jsonEvent) + 1
+            For rowCount = 0 To s - 1
+                If (jsonEvent(rowCount) = "") Then emptyRows = emptyRows + 1
+            Next
+            s = s - emptyRows
+        End If
+    End If
+ErrHndlr:
+    VariantDictSize = s
+End Function
+
+''''''''''''''''''''''''''
+''' Números
+''''''''''''''''''''''''''
+Public Function esNumeroAccionesValido(numeroAcciones As String) As Boolean
+On Error GoTo ErrHndlr
+    Dim esNum As Boolean
+    esNum = (IsNumeric(numeroAcciones) And Len(numeroAcciones) = Len(Replace(numeroAcciones, ".", "")) And Len(numeroAcciones) = Len(Replace(numeroAcciones, ",", "")) And numeroAcciones * 1 > 0 _
+                And numeroAcciones = "" & (numeroAcciones * 1))
+ErrHndlr:
+    esNumeroAccionesValido = esNum
+End Function
+
+''''''''''''''''''''''''''
+''' Cadenas
+''''''''''''''''''''''''''
+Public Function clearString(Subject As String) As String
+    clearString = Trim(Replace(Replace(Replace(Replace(Subject, SEP_TOKEN, "-"), Chr(34), "`"), Chr(39), "`"), ";", "-"))
+End Function
+
+Public Function timeStampNow() As String
+    timeStampNow = Format(Now, "YYYYMMDDHHMMSS") & Right(Strings.Format(Timer, "#0.00"), 2)
+End Function
+
+'' Validate email address
+Public Function IsEmailAddress(ByVal strEmailAddress As String) As Boolean
+    On Error GoTo Catch
+    
+    Dim objRegExp As Object: Set objRegExp = CreateObject("VBScript.RegExp")
+    Dim blnIsValidEmail As Boolean
+    
+    objRegExp.IgnoreCase = True
+    objRegExp.Global = True
+    objRegExp.pattern = "^([a-zA-Z0-9_\-\.]+)@[a-z0-9-]+(\.[a-z0-9-]+)*(\.[a-z]{2,20})$"
+    
+    blnIsValidEmail = objRegExp.test(strEmailAddress)
+Catch:
+    If Err Then
+        blnIsValidEmail = False
+        Err.Clear
+    End If
+    Set objRegExp = Nothing
+    IsEmailAddress = blnIsValidEmail
+End Function
+
+''''''''''''''''''''''''''
+''' Fechas
+''''''''''''''''''''''''''
+
+'TODO funcion que comprueba el formato fecha limitado a nuestro criterio
+Public Function esFechaValida(fecha As String) As Boolean
+On Error GoTo ErrHndlr
+    esFechaValida = False
+    ' Compruebo que tenga fecha completa y hora con minutos al menos  YYYY-MM-DD HH:mm
+    If (Len(fecha) >= 16) And IsDate(fecha) And Format(CDate(fecha), Athena_FullTime_Pattern) = fecha Then esFechaValida = True
+ErrHndlr:
+    If Err Then esFechaValida = False
+End Function
+
+Public Function getDatePrev(pattern As String) As String
+    If Weekday(Now, vbMonday) = 1 Then
+        getDatePrev = Format(DateAdd("d", -3, Now), pattern)
+    Else
+        getDatePrev = Format(DateAdd("d", -1, Now), pattern)
+    End If
+End Function
+
+Public Function getRelPrevDate(fecha As String, pattern As String) As String
+    Dim fechaAux As Date
+    Dim dia, mes, anno As Integer
+    dia = CInt(Mid(fecha, 9, 2))
+    mes = CInt(Mid(fecha, 6, 2))
+    anno = CInt(Mid(fecha, 1, 4))
+    fechaAux = DateSerial(anno, mes, dia)
+    If Weekday(fechaAux, vbMonday) = 1 Then
+        getRelPrevDate = Format(DateAdd("d", -3, fechaAux), pattern)
+    Else
+        getRelPrevDate = Format(DateAdd("d", -1, fechaAux), pattern)
+    End If
+End Function
+
+'Función que busca si el literal contiene una fecha en formato yyyy.mm.dd
+Public Function searchPatternAndReplaceDate(title As Variant) As String
+    Dim dateFormat As String
+    dateFormat = Athena_Date_PlannedTask
+    Dim titleString As String
+    Dim pattern5 As String
+    pattern5 = "DATE_M"
+    titleString = Replace(title, pattern5, UCase(MonthName(Month(Now), False)))
+    Dim pattern4 As String
+    pattern4 = "DATE_Y"
+    titleString = Replace(titleString, pattern4, Year(Now))
+    Dim pattern3 As String
+    pattern3 = "DATE_D-3"
+    titleString = Replace(titleString, pattern3, getRelPrevDate(getRelPrevDate(getRelPrevDate(Format(Now, dateFormat), dateFormat), dateFormat), dateFormat))
+    Dim pattern2 As String
+    pattern2 = "DATE_D-2"
+    titleString = Replace(titleString, pattern2, getRelPrevDate(getRelPrevDate(Format(Now, dateFormat), dateFormat), dateFormat))
+    Dim pattern1 As String
+    pattern1 = "DATE_D-1"
+    titleString = Replace(titleString, pattern1, getRelPrevDate(Format(Now, dateFormat), dateFormat))
+    Dim pattern0 As String
+    pattern0 = "DATE_D"
+    titleString = Replace(titleString, pattern0, Format(Now, dateFormat))
+    
+    searchPatternAndReplaceDate = titleString
+End Function
+
+Public Function CalcTime(stamp_start As String, stamp_stop As String) As Double
+On Error GoTo ErrHndlr
+    Dim t As Double
+    t = 0
+    If stamp_stop = "" Then stamp_stop = Format(Now, Athena_FullTime_Pattern)
+    
+    t = DateDiff("s", stamp_start, stamp_stop) / (60#)
+ErrHndlr:
+    CalcTime = t
+End Function
+
+Public Function convertTime(time As Double, Optional FullCode As Boolean = True) As String
+On Error GoTo ErrHndlr
+    Dim d As Integer:  d = 0
+    If FullCode Then d = time \ (24 * 60)
+    Dim d_resto As Double: d_resto = time - (d * 24 * 60)
+    
+    Dim h As Integer: h = d_resto \ 60
+    Dim h_resto As Double: h_resto = d_resto - (h * 60)
+    
+    Dim min As Integer: min = Fix(h_resto)
+    Dim min_resto As Double: min_resto = h_resto - min
+    Dim sec As Integer: sec = min_resto * 60
+    convertTime = CStr(h) & "h " & CStr(min) & "min"
+    If FullCode Then convertTime = CStr(d) & "d " & CStr(h) & "h " & CStr(min) & "min " & CStr(sec) & "s"
+    
+ErrHndlr:
+End Function
+
+
+''''''''''''''''''''''''''
+''' Otros
+''''''''''''''''''''''''''
+Public Sub JSON_Test()
+    Dim res As String
+    'Dim elements As Object
+    
+    
+    Dim value As Object
+    res = GetResponse("https://pokeapi.co/api/v2/pokemon")
+    Debug.Print res
+    Debug.Print ""
+    
+    Dim json As Object
+    Set json = Athena_cJSON.ParseJson(res)
+    Dim i As Long
+    i = 0
+    
+    For Each value In json("results")
+        Debug.Print value("name")
+    Next value
+    
+
+End Sub
+
+Private Function GetResponse(ByVal url As String) As String
+    Const RunAsync As Boolean = True
+    Const ProcessComplete As Integer = 4
+    
+    Dim request As MSXML2.XMLHTTP60
+    Set request = New MSXML2.XMLHTTP60
+    
+    Dim response As String
+    
+    With request
+        .Open "GET", url, RunAsync
+        .setRequestHeader "Content-Type", "application/json"
+        .Send
+        
+        Do While request.ReadyState <> ProcessComplete
+            DoEvents
+        Loop
+        response = .responseText
+    End With
+    GetResponse = response
+End Function
+
+Public Sub ClearDir(sPath As String, extension As String)
+On Error Resume Next
+    If Len(Dir$(sPath)) = 0 Then
+        MyMkDir sPath
+    Else
+        Kill (sPath & extension)
+        'Dim fso As Object, myFileNameDel As String, file As Object
+        'Set fso = CreateObject("Scripting.FileSystemObject") ' Connect to the file system
+        'For Each file In fso.GetFolder(sPath).files
+        '    myFileNameDel = file.name ' Get the file name (this line is not necessary but may help with troubleshooting)
+        '    file.Delete ' Delete the file found - this will occur each time it finds a file in the specified folder
+        'Next file ' find the next file in the specified folder
+        'Set fso = Nothing
+        'Set file = Nothing
+    End If
+End Sub
+
+Public Sub MyMkDir(sPath As String)
+    Dim iStart          As Integer
+    Dim aDirs           As Variant
+    Dim sCurDir         As String
+    Dim i               As Integer
+
+    If sPath <> "" Then
+        aDirs = Split(sPath, "\")
+        If Left(sPath, 2) = "\\" Then
+            iStart = 3
+        Else
+            iStart = 1
+        End If
+
+        sCurDir = Left(sPath, InStr(iStart, sPath, "\"))
+
+        For i = iStart To UBound(aDirs)
+            sCurDir = sCurDir & aDirs(i) & "\"
+            If Dir(sCurDir, vbDirectory) = vbNullString Then
+                MkDir sCurDir
+            End If
+        Next i
+    End If
+End Sub
+
+Public Sub copyFileFromNet(ddbb_file As String, SourcePath As String, DestinationPath As String, Optional overwrite As Boolean = False)
+    Dim oFSO As Object
+    Set oFSO = CreateObject("Scripting.FileSystemObject")
+
+    'Check if the file exists in the source
+    Dim StrOrFileExists As String: StrOrFileExists = Dir(SourcePath & ddbb_file)
+
+    If StrOrFileExists = "" Then '"The selected path doesn't exist"
+        If verbose Then Debug.Print "It's not posible copy the file " & StrOrFileExists
+    Else
+        'Check if the destination directory exists. If not, it's created
+        Dim StrFileExists As String: StrFileExists = Dir(DestinationPath, vbDirectory)
+
+        If StrFileExists = "" Then '"The selected path doesn't exist"
+            If verbose Then Debug.Print "Path not found. Creating " & DestinationPath
+            'MkDir DestinationPath
+            MyMkDir DestinationPath
+        End If
+
+        'Check if the file exists in the destination
+        Dim StrFileName As String: StrFileName = DestinationPath & ddbb_file
+
+        StrFileExists = Dir(StrFileName)
+        If StrFileExists = "" Or overwrite Then '"The selected file doesn't exist Or wants to overwrite it"
+            Call oFSO.CopyFile(SourcePath & ddbb_file, DestinationPath, True)
+            If verbose Then Debug.Print "Copying file to local: " & StrFileName
+        Else
+            If verbose Then Debug.Print StrFileName & " already exists"
+        End If
+    End If
+End Sub
+
+Public Sub copyLog(log_file As String, SourcePath As String, DestinationPath As String)
+On Error Resume Next
+    Dim oFSO As Object
+    Set oFSO = CreateObject("Scripting.FileSystemObject")
+    
+    'Checks directory
+    Dim StrFileExists As String
+    StrFileExists = Dir(DestinationPath, vbDirectory)
+    If StrFileExists = "" Then
+        If verbose Then Debug.Print "Path not found. Creating " & DestinationPath
+        MyMkDir DestinationPath
+    End If
+
+    Dim DestFile As String: DestFile = DestinationPath & log_file '& Format(Now, Athena_TimeStamp_Pattern) & "_" & log_file
+
+    Call oFSO.CopyFile(SourcePath & log_file, DestFile, True)
+End Sub
+
+Public Function hayConexionOutlook() As Boolean
+On Error GoTo ErrHndlr
+    Dim sincronizadoOutlook As Boolean: sincronizadoOutlook = True
+    sincronizadoOutlook = (CheckExchangeStatus >= 700)
+    If Not sincronizadoOutlook Then MsgBox "Está trabajando sin conexión en el outlook, ¿conectado con Microsoft Exchange?"
+ErrHndlr:
+    hayConexionOutlook = sincronizadoOutlook
+End Function
+
+Public Function hayConexionRed(SourcePath As String) As Boolean
+    On Error GoTo ErrHandle
+    Dim result As Boolean
+    result = False
+    Dim StrFileExists As String
+    StrFileExists = Dir(SourcePath, vbDirectory)
+    If StrFileExists = "" Then '"The selected path doesn't exist"
+        If verbose Then Debug.Print "Path not found: & SourcePath"
+        MsgBox "Sin acceso a " & SourcePath & ". (¿VPN activa?)"
+        result = False
+    Else
+        result = True
+    End If
+ErrHandle:
+    If Not result Then
+        If verbose Then Debug.Print "Path not found: & SourcePath"
+        MsgBox "Sin acceso a red " & SourcePath, vbCritical, "¿VPN activa?"
+    End If
+
+    hayConexionRed = result
+End Function
+
+'getMailBox: Devuelve el literal del buzón en el que te encuentres
+
+Public Function getMailBox(Optional token As Outlook.mailItem) As String
+    Dim buzon As String
+    Dim pos As Long
+    If token Is Nothing Then
+        buzon = Application.ActiveExplorer.currentFolder.FolderPath
+    Else
+        buzon = token.Parent.FolderPath
+    End If
+    pos = InStr(3, buzon, "\", vbTextCompare)
+    If (pos = 0) Then
+        pos = Len(buzon) + 1
+    End If
+    getMailBox = Mid(buzon, 3, pos - 3)
+End Function
+
+Public Function getPath(Optional token As Outlook.mailItem) As String
+    Dim buzon As String
+    Dim pos As Long
+    If token Is Nothing Then
+        buzon = Application.ActiveExplorer.currentFolder.FolderPath
+    Else
+        buzon = token.Parent.FolderPath
+    End If
+    getPath = buzon
+End Function
+
+
+Sub ExportTable2CSV(ddbb_data As String, Sql As String, out_file As String)
+On Error GoTo ErrorHndlr
+    Dim REPORT_LOCAL_PATH As String: REPORT_LOCAL_PATH = DDBB_Athena_local_file_path & "..\reports\"
+    Dim StrFileExists As String: StrFileExists = Dir(REPORT_LOCAL_PATH, vbDirectory)
+    If StrFileExists = "" Then '"The selected path doesn't exist"
+        If verbose Then Debug.Print "Path not found. Creating " & REPORT_LOCAL_PATH
+        MyMkDir REPORT_LOCAL_PATH
+    End If
+    ' Dwnload sqlite.exe if its not exists
+    Call copyFileFromNet("sqlite3.exe", Athena_Install_path, DDBB_Athena_local_file_path, False)
+    Dim command As String
+    command = DDBB_Athena_local_file_path & "sqlite3 -header -csv " & ddbb_data & " " & Chr(34) & Sql & Chr(34) & " " & Chr(62) & " " & Chr(34) & REPORT_LOCAL_PATH & out_file & Chr(34)
+    'Debug.Print command
+    ' Run query
+    'Call Shell(command, vbNormalFocus)
+    
+    ' Execute SQLite command and capture output
+    Dim WshShell As Object
+    Set WshShell = CreateObject("WScript.Shell")
+    Dim output As String
+    output = WshShell.Exec(command).StdOut.ReadAll
+    
+    ' Write output to file
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim file As Object
+    Set file = fso.CreateTextFile(REPORT_LOCAL_PATH & out_file, True)
+    file.Write output
+    file.Close
+ErrorHndlr:
+    Set fso = Nothing
+    Set file = Nothing
+    Set WshShell = Nothing
+End Sub
+
+Public Function GetFileSize(PathName As String)
+On Error GoTo ErrHndlr
+    GetFileSize = FileLen(PathName)
+ErrHndlr:
+    If Err Then GetFileSize = 0
+End Function
+
+Public Function GetFileNameFromPath(PathName As String)
+On Error GoTo ErrHndlr
+    GetFileNameFromPath = Right(PathName, Len(PathName) - InStrRev(PathName, "\", -1))
+ErrHndlr:
+    If Err Then GetFileNameFromPath = ""
+End Function
+
+'''''''''''''''''''' VIEW '''''''''''''''''''''''''''
+
+'botonSaveView
+Public Sub doSaveAthenaView()
+    ' Get user
+    Dim userL As String: userL = getUserLogin
+    
+    ' Get email mailbox trying to set up View
+    Dim emailXml As String: emailXml = Athena_Get_MailBoxEmail
+    
+    If Not IsUserValidInMailBox(userL, emailXml, True, True) Then
+        MsgBox "Acción no permitida"
+    Else
+        Dim v As Outlook.view: Set v = Outlook.Application.ActiveExplorer.currentFolder.Views.item(Athena_View)
+        If Not v Is Nothing Then
+            If MsgBox("Va a sobrescribir la vista genérica " & Athena_View & ", está seguro?", vbYesNo, "Guardar Vista") = vbYes Then
+                ' Append Extension
+                emailXml = emailXml & ".xml"
+                
+                ' Get xml Paths
+                Dim xmlPathLocal As String: xmlPathLocal = Athena_Get_MailBoxXMLPath("", True)
+                Dim xmlPathNet As String: xmlPathNet = Athena_Get_MailBoxXMLPath("", False)
+                
+                ' Save locally
+                writeXMLToFile xmlPathLocal & emailXml, v.xml
+                
+                ' Upload remote View conf.
+                Call copyFileFromNet(emailXml, xmlPathLocal, xmlPathNet, True)
+                
+                MsgBox "Vista genérica " & Athena_View & " guardada."
+            End If
+        Else
+            MsgBox "No tiene definida la vista genérica " & Athena_View & ", debe configurarla previamente"
+        End If
+    End If
+End Sub
+
+Public Sub doSetUpAthenaView()
+    doSetUpAthenaCategories
+    doSetUpAthenaGeneralView
+    doSetUpAthenaViewConditionalFormat
+End Sub
+
+Private Sub doSetUpAthenaGeneralView()
+On Error GoTo ErrHndlr
+    ' Load General View
+    Dim v As Outlook.view: Set v = Outlook.Application.ActiveExplorer.currentFolder.Views.item(Athena_View)
+    Dim noExiste As Boolean: noExiste = False
+    Dim myXml As String
+    
+    ' Get email mailbox trying to set up View
+    Dim emailXml As String: emailXml = Athena_Get_MailBoxEmail & ".xml"
+    
+    ' Get xml Paths
+    Dim xmlPathLocal As String: xmlPathLocal = Athena_Get_MailBoxXMLPath("", True)
+    Dim xmlPathNet As String: xmlPathNet = Athena_Get_MailBoxXMLPath("", False)
+    
+    '(First) View does not exists ==> Create it
+    If v Is Nothing Then
+        Set v = Outlook.Application.ActiveExplorer.currentFolder.Views.Add(Athena_View, olTableView, olViewSaveOptionThisFolderEveryone)
+        noExiste = True
+    End If
+    
+    ' Initial Conf. if there is no Net conf. View
+    If Dir(xmlPathNet & emailXml) = "" Then
+        ' Set initial set up
+        myXml = "<?xml version='1.0'?> <view type='table'><viewname>" & Athena_View & "</viewname><atme>0</atme><viewstyle>table-layout:fixed;width:100%;font-family:Segoe UI;font-style:normal;font-weight:normal;font-size:8pt;color:Black;font-charset:0</viewstyle><viewtime>222522494</viewtime> <linecolor>8421504</linecolor><linestyle>3</linestyle>" & _
+        "<previewlines>0</previewlines><previewlineschangenum>5</previewlineschangenum><ensuredcategoriesfield>1</ensuredcategoriesfield><collapsestate/><rowstyle>background-color:White;color:Black</rowstyle><headerstyle>background-color:#D3D3D3</headerstyle><previewstyle>color:#777777</previewstyle><arrangement><autogroup>1</autogroup>" & _
+        "<persistgroups>1</persistgroups> <upgradetoconv>1</upgradetoconv><enablexfc>1</enablexfc><collapseclient/><collapseconv/><alwaysexpandconversations>1</alwaysexpandconversations><upgradetoconvchangenum>1</upgradetoconvchangenum></arrangement>"
+    
+        myXml = myXml & "<column><name>HREF</name><prop>DAV:href</prop><checkbox>1</checkbox></column>"
+        myXml = myXml & "<column><heading>Recibido</heading><prop>urn:schemas:httpmail:datereceived</prop><type>datetime</type><width>75</width><style>padding-left:3px;;text-align:left</style><editable>0</editable><format>M/d/yyyy||h:mm tt</format><displayformat>2</displayformat></column>"
+        myXml = myXml & "<column><format>boolicon</format><heading>Datos adjuntos</heading><prop>urn:schemas:httpmail:hasattachment</prop><type>boolean</type><bitmap>1</bitmap><width>10</width><style>padding-left:3px;;text-align:center</style><editable>0</editable><displayformat>3</displayformat></column>"
+        myXml = myXml & "<column><heading>Icono</heading><prop>http://schemas.microsoft.com/mapi/proptag/0x0fff0102</prop><bitmap>1</bitmap><width>18</width><style>padding-left:3px;;text-align:center</style><editable>0</editable></column>"
+        myXml = myXml & "<column><heading>De</heading><prop>urn:schemas:httpmail:fromname</prop><type>string</type><width>143</width><style>padding-left:3px;;text-align:left</style><editable>0</editable><displayformat>1</displayformat></column>"
+        myXml = myXml & "<column><heading>Asunto</heading><prop>urn:schemas:httpmail:subject</prop><type>string</type><width>478</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>.Comment</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/.Comment</prop><width>171</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><heading>Categorías</heading><prop>urn:schemas-microsoft-com:office:office#Keywords</prop><width>178</width><sortable>0</sortable><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Category & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Category & "</prop><width>159</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Client & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Client & "</prop><width>45</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Dept & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Dept & "</prop><width>38</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Priority & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Priority & "</prop><width>19</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        'myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Customer & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Customer & "</prop><width>19</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><type>string</type><heading>" & Athena_Column_Solver & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Solver & "</prop><width>25</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><heading>" & Athena_Column_Time & "</heading><prop>http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/" & Athena_Column_Time & "</prop><type>string</type><width>101</width><style>padding-left:3px;;text-align:left</style><editable>1</editable></column>"
+        myXml = myXml & "<column><heading>En la carpeta</heading><prop>http://schemas.microsoft.com/mapi/proptag/0x0e05001f</prop><type>string</type><width>139</width><style>padding-left:3px;;text-align:left</style><editable>0</editable></column>"
+    
+        myXml = myXml & "<groupby> <order> <heading>Conversación</heading> <prop>urn:schemas:httpmail:thread-topic</prop> <type>string</type> <sort>asc</sort> </order> </groupby> <orderby> <order> <heading>Recibido</heading> <prop>urn:schemas:httpmail:datereceived</prop> <type>datetime</type> <sort>desc</sort> </order> </orderby> <filter/>" & _
+        "<groupbydefault>0</groupbydefault> <previewpane> <markasread>0</markasread> </previewpane> </view>"
+        
+        'writeXMLToFile xmlPath, myXml
+    Else
+        If Dir(xmlPathLocal & emailXml) = "" Then
+            ' Download remote View conf.
+            Call copyFileFromNet(emailXml, xmlPathNet, xmlPathLocal, True)
+        End If
+        
+        ' Get Xml set up from file
+        myXml = readXMLFromFile(xmlPathLocal & emailXml)
+    End If
+    
+    'If Trim(myXml) = "" Then
+    '    ' Get Xml set up from db
+    '    myXml = Athena_Get_ViewXML_MailBox(email)
+    'End If
+        
+    ' If not stored
+    If myXml <> "" Then
+        v.xml = myXml
+        v.Save
+    End If
+     
+    v.Apply
+ErrHndlr:
+    If Err Then MsgBox Err.Description
+    Set v = Nothing
+End Sub
+
+Private Sub doSetUpAthenaCategories()
+On Error Resume Next
+    ' Get email mailbox trying to set up View
+    Dim buzon As String: buzon = Athena_Get_MailBoxEmail
+    doSetOutlookCategory buzon, Athena_Mail_Status_NoClassify, olCategoryColorBlue
+    doSetOutlookCategory buzon, Athena_Mail_Status_UnAssigned, olCategoryColorMaroon
+    doSetOutlookCategory buzon, Athena_Mail_Status_Started, olCategoryColorDarkYellow
+    doSetOutlookCategory buzon, Athena_Mail_Status_Stopped, olCategoryColorRed
+    doSetOutlookCategory buzon, Athena_Mail_Status_End, olCategoryColorGreen
+    doSetOutlookCategory buzon, Athena_Mail_Status_Discarted, olCategoryColorBlack
+ErrHndlr:
+    If Err Then MsgBox Err.Description
+End Sub
+
+Private Sub doSetOutlookCategory(buzon As String, category As String, color As OlCategoryColor)
+On Error Resume Next
+    'If Outlook.Application.GetNamespace("MAPI").categories.item(category) Is Nothing Then
+    '    Outlook.Application.GetNamespace("MAPI").categories.Add category, color, 0
+    'Else
+    '    Outlook.Application.GetNamespace("MAPI").categories.item(category).color = color
+    'End If
+    
+    If Session.Stores.item(buzon).categories.item(category) Is Nothing Then
+        Session.Stores.item(buzon).categories.Add category, color, 0
+    Else
+        Session.Stores.item(buzon).categories.item(category).color = color
+    End If
+ErrHndlr:
+    If Err Then MsgBox Err.Description
+End Sub
+
+Private Sub doSetUpAthenaViewConditionalFormat()
+On Error GoTo ErrHndlr
+    Dim v As Outlook.view
+    Dim objRule As AutoFormatRule: Set v = Outlook.Application.ActiveExplorer.currentFolder.Views.item(Athena_View) '
+    v.Reset
+    v.Apply
+    
+    If v.ViewType = olTableView Then
+        ' Sin Clasificar
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_NoClassify)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_NoClassify)
+        With objRule
+            .Filter = Chr(40) & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_NoClassify & "%'" & Chr(41)
+            .Enabled = True
+            .Font.color = 5
+        End With
+        ' Sin Asignar
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_UnAssigned)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_UnAssigned)
+        With objRule
+            .Filter = Chr(40) & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_UnAssigned & "%'" & Chr(41)
+            .Enabled = True
+            .Font.color = 6
+        End With
+        ' Iniciada
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_Started)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_Started)
+        With objRule
+            .Filter = Chr(40) & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Started & "%'" & Chr(41)
+            .Enabled = True
+            .Font.color = 4
+        End With
+        ' En Pausa
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_Stopped)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_Stopped)
+        With objRule
+            .Filter = Chr(40) & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Stopped & "%'" & Chr(41)
+            .Enabled = True
+            .Font.color = 2
+        End With
+        ' Finalizado
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_End)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_End)
+        With objRule
+            .Filter = Chr(40) & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_End & "%'" & Chr(41)
+            .Enabled = True
+            .Font.color = 3
+        End With
+        ' Descartado
+        Set objRule = v.AutoFormatRules.item(Athena_Mail_Status_Discarted)
+        If objRule Is Nothing Then Set objRule = Outlook.ActiveExplorer.CurrentView.AutoFormatRules.Add(Athena_Mail_Status_Discarted)
+        With objRule
+            .Filter = Chr(40) _
+            & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Discarted & "%'" _
+            & " OR " & Chr(34) & "urn:schemas-microsoft-com:office:office#Keywords" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Discarted_Related & "%'" _
+            & " OR " & Chr(34) & "urn:schemas:httpmail:displaycc" & Chr(34) & " LIKE '%" & Athena_Mail_Status_Discarted & "%'" _
+            & Chr(41)
+            .Enabled = True
+            .Font.color = 8
+        End With
+            
+    End If
+    
+    v.Save
+ErrHndlr:
+    If Err Then MsgBox Err.Description
+    Set v = Nothing
+    Set objRule = Nothing
+End Sub
+
+''''' Write File
+Public Sub writeXMLToFile(myfilePath As String, xml As String)
+On Error GoTo Errhandler:
+    Dim lines() As String
+    Dim line As Variant
+    
+    If Len(myfilePath) = 0 Then
+       Debug.Print "Error: Xml file path is empty."
+       Exit Sub
+    End If
+       
+    Dim FileNum As Integer
+    FileNum = FreeFile ' next file number
+    Open myfilePath For Output As #FileNum ' creates the file if it doesn't exist
+    lines = VBA.Split(xml, VBA.vbLf)
+    For Each line In lines
+       Print #FileNum, line ' write Logbuffer to text file
+    Next line
+    Close #FileNum ' close the file
+Errhandler:
+    If Err Then Debug.Print "Error writing to XML: " & myfilePath & " " & Err.Number & " " & Err.Description
+End Sub
+
+Public Function readXMLFromFile(myfilePath As String) As String
+On Error GoTo Errhandler:
+    Dim TextString As String
+    Dim FileToRead As Object
+    Dim fso As New FileSystemObject
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set FileToRead = fso.OpenTextFile(myfilePath, ForReading) 'add here the path of your text file
+    
+    TextString = FileToRead.ReadAll
+    
+    FileToRead.Close
+    
+    readXMLFromFile = TextString
+Errhandler:
+    Set fso = Nothing
+    Set FileToRead = Nothing
+    If Err Then Debug.Print "Error reading XML: " & myfilePath & " " & Err.Number & " " & Err.Description
+End Function

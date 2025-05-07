@@ -1,0 +1,54 @@
+Option Explicit
+
+Private WithEvents mobjCommandBars As Office.CommandBars
+Private WithEvents items As Outlook.items
+Private WithEvents Drafts As Outlook.items
+Private WithEvents DraftsFolder As Outlook.Folder
+Private WithEvents ConfirmAppointment As Office.CommandBarButton
+
+Private Sub Application_Startup()
+    ' Set up User Environment
+    Call Athena_cParams.initUserPath(True, True)
+    'Call StartTimer
+End Sub
+
+Private Sub Application_Quit()
+
+End Sub
+
+''' Add a listener to Inbox mails to check when a new email is received to:
+'       - Create Draft on not already classified ConvTopic (Athena_cTaskManager.Athena_new_mail(Msg))
+'       - Record new email to ConvTopic ???
+'       - Update email reply ConversationTopic to an already Merge Conversation email chain ???
+Private Sub Items_ItemAdd(ByVal item As Object)
+
+End Sub
+
+''' Add a listener to Drafts emails to check when an email is deleted to:
+'       - Nothing
+Private Sub Drafts_ItemRemove()
+
+End Sub
+
+''' Add a listener to Drafts emails to check when category changes over a draft to:
+'
+Private Sub Drafts_ItemChange(ByVal item As Object)
+
+End Sub
+
+''' Add a listener to Drafts Folder to check when one draft is deleted to:
+'       - Delete Pre_TASK if there is a default draft generated previously
+Private Sub DraftsFolder_BeforeItemMove(ByVal item As Object, ByVal MoveTo As MAPIFolder, Cancel As Boolean)
+
+End Sub
+
+
+''' Stablish global boolean variable to True once AdvanceSearch has end
+'
+Private Sub Application_AdvancedSearchComplete(ByVal SearchObject As Search)
+    If SearchObject.tag = "MySearch" Then
+        blnSearchComp = True
+    End If
+End Sub
+
+
