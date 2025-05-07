@@ -1,0 +1,1098 @@
+Option Explicit
+
+
+Public GLOBAL_CLIENT As String
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' CONST
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+Public Prop_verbose As Boolean ' = False
+Public Const lowLatency As Boolean = True
+Public Const full_trace As Boolean = False
+'Public Const ATHENA_VERSION As String = "v.0.2.3 01/12/2023"
+Public Const ATHENA_VERSION As String = "v.0.2.5 08/02/2024"
+
+'-----------------------------
+' LOGGER
+'-----------------------------
+Public myLogger As Object
+
+'-----------------------------
+' DICTIONARIES
+'-----------------------------
+Public PropDict As Object
+
+'-----------------------------
+' F(X)
+'-----------------------------
+Public tokenCopied As Outlook.mailItem
+Public blnSearchComp As Boolean
+
+'-----------------------------
+' ERROR MESSAGES
+'-----------------------------
+Public Const info_not_found_err As String = "Sin info para buzon seleccionado"
+Public Const err_token_not_selected As String = "No ha seleccionado un correo correcto de control"
+Public Const err_token_empty_selected As String = "No ha seleccionado ningún correo"
+Public Const err_token_multiple_selected As String = "Ha seleccionado varios correos"
+
+Public Const ATHENA_CONTROL_OK As Integer = 0
+Public Const ATHENA_CONTROL_CANCEL As Integer = 1
+
+
+''' Athena DDBB
+Public RutaLibAthena As String
+Public Athena_log As String
+Public Const DDBB_Athena_file As String = "ATHENA_NET.db"
+Public Const DDBB_Athena_file_data_HIST As String = "ATHENA_NET_DATA_HIST.db"
+Public Const DDBB_Athena_local_file_path As String = "C:\DATOS\ATHENA_TASKMANAGER\db\"
+
+Public Prop_DDBB_Athena_file_path As String
+Public Prop_DDBB_Athena_file_path_reporting As String
+Public Prop_Athena_log_path As String
+Public Prop_Athena_Install_path As String
+
+Public Const Athena_Install_file As String = "Athena_Installer_remote.lnk"
+
+Public Const ESTADOFromCuerpoNDS As Integer = 0
+Public Const UNIDADFromCuerpoNDS As Integer = 1
+Public Const CATEGORIAFromCuerpoNDS As Integer = 2
+Public Const IDMAILFromCuerpoNDS As Integer = 3
+
+Public Const TextOnlyOneFile As String = "Es necesario seleccionar un único correo"
+Public Const TextNoSelectedMail As String = "No hay ningún correo seleccionado"
+Public Const TextOnlyNDSTag As String = "La acción se debe realizar sobre un correo de control ([NDS])"
+Public Const TextNoNDSTag As String = "La acción NO se puede realizar sobre un correo de control ([NDS])"
+Public Const TextSelectMail As String = "Selecciona un elemento válido para iniciar. Selecciona un Mail"
+
+Public Const NdsStateInicio As String = "Inicio"
+Public Const NdsStatePausa As String = "Pausa"
+Public Const NdsStateFin As String = "Fin"
+Public Const NdsStateContinua As String = "Continua"
+Public Const NdsStatePredef As String = "Programada"
+
+Public Const CatEnCurso As String = "En Curso"
+Public Const CatPendiente As String = "Tarea Pendiente"
+
+Public Const CatRober As String = "Roberto"
+Public Const CatAlmu As String = "Almudena"
+Public Const CatJavi As String = "Javi"
+Public Const CatDani As String = "Dani"
+Public Const CatEdu As String = "Edu"
+
+Public Const NDSPrefixSubject As String = "[NDS] - "
+
+' // Search FormVars / campos
+Public Const CAMPO_TITLE_FULL = 0
+Public Const CAMPO_NUM_ACTIONS = 1
+Public Const CAMPO_AREA_COD = 2
+Public Const CAMPO_COUNTRY_COD = 3
+Public Const CAMPO_CATEGORY_COD = 4
+Public Const CAMPO_TIME_ADJUST = 5
+Public Const CAMPO_TIME_START = 6
+Public Const CAMPO_TIME_END = 7
+Public Const CAMPO_POSTPONED = 8
+Public Const CAMPO_REASSIGNED = 9
+Public Const CAMPO_USER_COD = 10
+Public Const CAMPO_ORIGIN_COD = 11
+Public Const CAMPO_AREA = 12
+Public Const CAMPO_COUNTRY = 13
+Public Const CAMPO_CATEGORY = 14
+Public Const CAMPO_USER = 15
+Public Const CAMPO_PRIORITY_COD = 16
+Public Const CAMPO_PRIORITY = 17
+Public Const CAMPO_MAIL_STAMP = 18
+Public Const CAMPO_USER_EMPLOYEE = 19
+Public Const CAMPO_COMMENT = 20
+Public Const CAMPO_ORIGIN = 21
+Public Const CAMPO_INC_OP = 22
+Public Const CAMPO_NUM_ACTIONS_ERR = 23
+Public Const CAMPO_PK = 24
+Public Const CAMPO_TAG = 25
+Public Const CAMPO_MATRIX_UNITS = 26
+'Public Const CAMPO_CLIENT_COD = 27
+'Public Const CAMPO_CLIENT = 28
+
+'Units
+'''''Cross
+Public Const UNIT_CROSS = "CROSS"
+Public Const UNIT_CROSS_COD = 50
+
+'Token Fields
+Public Const SEP_TOKEN = "|"
+'''''Header
+Public Const TOKEN_TASK_ID = "taskid"
+Public Const TOKEN_TITLE = "title"
+Public Const TOKEN_COMMENT = "comments"
+'''''Times
+Public Const TOKEN_LAST_UPDATE_STAMP = "token_last_update"  'DATE
+Public Const TOKEN_TOKEN_STAMP = "token_stamp"  'DATE
+Public Const TOKEN_MAIL_STAMP = "mail_stamp"  'DATE
+Public Const TOKEN_DUTY_STAMP = "duty_stamp"  'DATE
+'''''Trace
+Public Const TOKEN_CONVERSATION_ID = "token_conversation_id"
+Public Const TOKEN_ENTRY_ID = "token_entry_id"
+Public Const TOKEN_DB_FILE = "db"
+Public Const TOKEN_MAILBOX = "mailbox"
+Public Const TOKEN_PATH = "path"
+Public Const TOKEN_SYNCHRO = "synchronized"
+'''''Category
+Public Const TOKEN_AREA = "area"
+Public Const TOKEN_UNIT = "country"
+Public Const TOKEN_CAT = "category"
+Public Const TOKEN_AREA_COD = "area_dept_cod"
+Public Const TOKEN_UNIT_COD = "unit_cod"
+Public Const TOKEN_CAT_COD = "area_dept_cat_cod"
+Public Const TOKEN_EVENTS_CAT = "events_Area_Dept_Cat"
+Public Const TOKEN_MATRIX_CAT_PRCT = "matrix_area_dept_cat"
+Public Const TOKEN_MATRIX_UNITS = "matrix_units"
+'''''Status
+Public Const TOKEN_STATUS = "token_categories"
+Public Const TOKEN_STATUS_COD = "status_cod"
+Public Const TOKEN_EVENTS_STATUS = "events"
+'''''Origin
+Public Const TOKEN_ORIGIN = "origin"
+Public Const TOKEN_ORIGIN_COD = "origin_cod"
+'''''Priority
+Public Const TOKEN_PRIORITY = "priority"
+Public Const TOKEN_PRIORITY_COD = "priority_cod"
+Public Const TOKEN_EVENTS_PRIORITY = "events_priority"
+'''''client
+Public Const TOKEN_CLIENT = "client"
+'''''Owner
+Public Const TOKEN_OWNER = "owner"
+Public Const TOKEN_OWNER_COD = "owner_cod"
+Public Const TOKEN_EVENTS_OWNER = "events_owner"
+'''''Volumen
+Public Const TOKEN_VOLUMEN = "num_actions"
+Public Const TOKEN_EVENTS_VOLUMEN = "events_volumen"
+'''''Notes
+Public Const TOKEN_NOTES = "notes"
+'''''Marks
+Public Const TOKEN_PK = "pk"
+Public Const TOKEN_TAG = "tag"
+Public Const TOKEN_INDEX = "index"
+'''''Incident
+Public Const TOKEN_INCIDENT_OP = "incidencia_op"
+Public Const TOKEN_VOLUMEN_ERROR = "num_actions_err"
+Public Const TOKEN_COMUNICA = "comunica"
+'''''Tickets
+Public Const TOKEN_EVENTS_TICKET = "ticket"
+
+
+'Eventos
+Public Const EVENTO_JSON_STATUS = 1
+Public Const EVENTO_JSON_STAMP = 2
+Public Const EVENTO_JSON_ADJUST = 3
+Public Const EVENTO_JSON_IGNORE = 4
+Public Const EVENTO_JSON_WHO = 5
+Public Const EVENTO_JSON_TIME = 6
+
+Public Const Athena_planned_time_morning As Long = 1
+Public Const Athena_planned_time_midday As Long = 2
+
+Public Const Athena_FullTime_Pattern As String = "YYYY-MM-DD HH:MM:SS"
+Public Const Athena_FullDate_Pattern As String = "YYYY-MM-DD"
+Public Const Athena_TraceDate_Pattern As String = "YYYYMMDD"
+Public Const Athena_TraceMonthDate_Pattern As String = "YYYYMMDD"
+Public Const Athena_TimeStamp_Pattern As String = "YYYYMMDD_HHMMSS"
+Public Const Athena_FilterMail_Pattern As String = "D/M/YYYY"
+Public Const Athena_Date_PlannedTask As String = "yyyy.mm.dd"
+
+Public Const AthenaEmptyJson As String = "{'taskid': 0,'is_open': -1,'is_active': -1,'categorias':[null],'origen': null,'conversation': null,'emails': [null],'trace_time_min': null,'last_mark_event': null}"
+
+Public Const Athena_Mail_Desc_Manual = "Manual task"
+
+Public Const Athena_Mail_Status_NoClassify = "#Sin Clasificar" ' Sin Asignar
+Public Const Athena_Mail_StatusCod_NoClassify = 1
+Public Const Athena_Mail_StatusIcon_NoClassify = 323
+
+Public Const Athena_Mail_Status_Classifying = "#Clasificando"
+
+Public Const Athena_Mail_Status_NoStart = "#Sin Iniciar" ' Asignada // DREPRECATED
+Public Const Athena_Mail_StatusCod_NoStart = 3
+Public Const Athena_Mail_StatusIcon_NoStart = 468  '274
+
+Public Const Athena_Mail_Status_Started = "#Iniciada" ' Asiganda
+Public Const Athena_Mail_StatusCod_Started = 2
+Public Const Athena_Mail_StatusIcon_Started = 264
+
+Public Const Athena_Mail_Status_Stopped = "#En Pausa" ' Asignada
+Public Const Athena_Mail_StatusCod_Stopped = 3
+Public Const Athena_Mail_StatusIcon_Stopped = 266
+
+Public Const Athena_Mail_Status_End = "#Finalizada" ' Asignada
+Public Const Athena_Mail_StatusCod_End = 4
+Public Const Athena_Mail_StatusIcon_End = 311
+
+Public Const Athena_Mail_Status_UnAssigned = "#Sin Asignar" ' Sin Asignar + En Pausa
+Public Const Athena_Mail_Owner_UnAssigned = "Sin Asignar" ' Sin Asignar + En Pausa
+Public Const Athena_Mail_OwnerCod_UnAssigned = -1 ' Sin Asignar + En Pausa
+Public Const Athena_Mail_StatusCod_UnAssigned = 5
+Public Const Athena_Mail_StatusIcon_UnAssigned = 280
+
+Public Const Athena_Mail_Status_Discarted = "#Descartado"
+Public Const Athena_Mail_StatusCod_Discarted = 6
+Public Const Athena_Mail_StatusIcon_Discarted = 325
+Public Const Athena_Mail_Status_Discarted_Related = "#Revisado"
+
+Public Const Athena_Role_Admin = "Admin"
+Public Const Athena_Role_AdminCod = "1"
+Public Const Athena_Role_Visor = "Visor"
+Public Const Athena_Role_VisorCod = "2"
+Public Const Athena_Role_Super = "Supervisor"
+Public Const Athena_Role_SuperCod = "3"
+
+''''' Custom Columns
+Public Const Athena_Column_Category = ".Category"
+Public Const Athena_Column_Solver = ".Solver"
+Public Const Athena_Column_Client = ".Client"
+'Public Const Athena_Column_Customer = ".Cliente"
+Public Const Athena_Column_Dept = ".Dept"
+Public Const Athena_Column_Priority = ".Priority"
+Public Const Athena_Column_Comm = ".Comment"
+Public Const Athena_Column_Time = ".Time"
+
+'''' Plannification
+Public Const Athena_Folder_Plann = ":Planificadas"
+Public Const Athena_FolderSub_Plann = ":Marcas"
+Public Const TOKEN_INIT_UPDATE_STAMP = "token_init_stamp"  'DATE
+''Public Const Athena_TimePlann_Pattern As String = "HH:MM" -- left(split(Format(Now, Athena_FullTime_Pattern)," ")(1),5)
+
+'''' View
+Public Const Athena_View = "Athena_TaskManager"
+
+Public Const Athena_Mail_PriorityCod_Critical = 4
+Public Const Athena_Mail_Priority_Critical = "Muy Alta"
+Public Const Athena_Mail_PriorityCod_High = 3
+Public Const Athena_Mail_Priority_High = "Alta"
+Public Const Athena_Mail_PriorityCod_Normal = 2
+Public Const Athena_Mail_Priority_Cliente = "Cliente"
+Public Const Athena_Mail_PriorityCod_Low = 1
+Public Const Athena_Mail_Priority_Low = "Baja"
+
+'Public Const anterior para origin
+'Public Const Athena_Token_origin_Manual = "Manual"
+'Public Const Athena_Token_origin_Manual_Cod = 1
+'Public Const Athena_Token_origin_Email = "Mail"
+'Public Const Athena_Token_origin_Email_Cod = 2
+'Public Const Athena_Token_origin_Planned = "Planificada"
+'Public Const Athena_Token_origin_Planned_Cod = 3
+'Public Const Athena_Token_origin_Ticket = "Ticket"
+'Public Const Athena_Token_origin_Ticket_Cod = 4
+'Public Const Athena_Token_origin_AI = "IA"
+'Public Const Athena_Token_origin_AI_Cod = 5
+
+Public Const Athena_Token_origin_Cliente = "Cliente"
+Public Const Athena_Token_origin_Cliente_Cod = 1
+Public Const Athena_Token_origin_BO = "Back-Office/País"
+Public Const Athena_Token_origin_BO_Cod = 2
+Public Const Athena_Token_origin_FO = "Front Office/Ventas"
+Public Const Athena_Token_origin_FO_Cod = 3
+Public Const Athena_Token_origin_IG = "Implementación global"
+Public Const Athena_Token_origin_IG_Cod = 4
+Public Const Athena_Token_origin_GTB = "GTBDesk"
+Public Const Athena_Token_origin_GTB_Cod = 5
+Public Const Athena_Token_origin_IT = "IT"
+Public Const Athena_Token_origin_IT_Cod = 6
+
+Public Const Athena_Mail_UnAssigned = -1
+
+Public Const Athena_Event_TraceCod = 0
+Public Const Athena_Event_Trace = "Trace"
+Public Const Athena_Event_ActivityCod = 1
+Public Const Athena_Event_Activity = "Status"
+Public Const Athena_Event_OwnershipCod = 2
+Public Const Athena_Event_Ownership = "Assigned"
+Public Const Athena_Event_ClassifiedCod = 3
+Public Const Athena_Event_Classified = "Classified"
+Public Const Athena_Event_PriorizationCod = 4
+Public Const Athena_Event_Priorization = "Priorized"
+Public Const Athena_Event_VolumeCod = 5
+Public Const Athena_Event_Volume = "Volume"
+
+Public Const PR_CONVERSATION_TOPIC = "http://schemas.microsoft.com/mapi/proptag/0x0070001E"
+Public Const PR_CONVERSATION_INDEX = "http://schemas.microsoft.com/mapi/proptag/0x00710102"
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' VARS
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+Function checkVersion() As String
+    Dim versionID As Variant
+    versionID = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, "SELECT VER_VERSION FROM M_VER_VERSIONES WHERE M_VER_VERSIONES.VER_ACTIVO = 1", verbose)
+    checkVersion = ""
+    If Not IsEmpty(versionID) And VariantSize(versionID) > 0 Then
+        checkVersion = versionID(0)(0)
+    End If
+End Function
+'''''
+
+' Initialize stopword Es Dictionary
+Private Sub Class_InitializeProp()
+    ' Load stopwords from file
+    Set PropDict = LoadPropertiesJson(DDBB_Athena_local_file_path + "..\config\TaskManager.properties.json")
+End Sub
+ 
+' Load stopword Es Dictionary into class var
+Private Function LoadPropertiesJson(ByVal filePath As String) As Object
+On Error GoTo ErrHndlr
+    ' Check if the file exists
+    If Dir(filePath) = "" Then
+       Err.Raise -1, "LoadProperties", "Properties file not found"
+    End If
+    ' Read stopwords from the file and add them to the dictionary
+    Dim fileContent As String
+    Dim fileLines As Variant
+    Open filePath For Input As #1
+    fileContent = Input$(LOF(1), 1)
+    Close #1
+ 
+    ' Create a Dictionary to store stopwords
+    Set LoadPropertiesJson = Athena_cJSON.ParseJson(fileContent)
+ErrHndlr:
+    If Err Then Debug.Print Err.Description
+    If LoadPropertiesJson Is Nothing Then Err.Raise -1, "LoadProperties", "Properties file not found"
+End Function
+
+Public Function verbose()
+    If PropDict Is Nothing Then Class_InitializeProp
+    verbose = LCase(PropDict("TM.verbose")) = "true"
+End Function
+
+'v.0.3.0 ==> //LOCAL
+Public Function DDBB_Athena_file_path()
+    DDBB_Athena_file_path = DDBB_Athena_local_file_path
+End Function
+'v.0.3.0 ==> //REMOTE
+Public Function DDBB_Athena_file_path_remote()
+    If PropDict Is Nothing Then Class_InitializeProp
+    DDBB_Athena_file_path_remote = PropDict("TM.remotePath.bbdd")
+End Function
+Public Function DDBB_Athena_file_path_reporting()
+    If PropDict Is Nothing Then Class_InitializeProp
+    DDBB_Athena_file_path_reporting = PropDict("TM.remotePath.reporting")
+End Function
+Public Function Athena_log_path()
+    If PropDict Is Nothing Then Class_InitializeProp
+    Athena_log_path = PropDict("TM.remotePath.log")
+End Function
+Public Function Athena_Install_path()
+    If PropDict Is Nothing Then Class_InitializeProp
+    Athena_Install_path = PropDict("TM.remotePath.install")
+End Function
+
+
+Function DDBB_Athena_file_data(Optional token As Outlook.mailItem = Nothing) As String
+On Error GoTo ErrHndlr
+    Dim db As String: db = "ATHENA_NET_DATA.db"
+    
+    ' New Method 3.0 >> Everything stored at local db
+    ' Get local db name
+    Dim ddbb_file_dest As String: ddbb_file_dest = Replace(db, ".db", "_" & UCase(getUserLogin) & ".db")
+    ' Check if there is such db at local path
+    If Len(Dir$(DDBB_Athena_local_file_path & ddbb_file_dest)) = 0 Then
+        ' Check if there is such db at net path
+        If Len(Dir$(DDBB_Athena_file_path_remote & "usr\" & ddbb_file_dest)) = 0 Then
+            ' There is no remote too >> Create local one from empty copy
+            FileCopy DDBB_Athena_file_path_remote & "ATHENA_NET_DATA_EMPTY.db", DDBB_Athena_file_path & ddbb_file_dest
+        Else
+            ' Download already remote usr db
+            FileCopy DDBB_Athena_file_path_remote & ddbb_file_dest, DDBB_Athena_file_path & ddbb_file_dest
+        End If
+    Else
+        '// Do Nothing
+    End If
+    
+    DDBB_Athena_file_data = ddbb_file_dest
+
+ErrHndlr:
+    If Err Then
+        MsgBox "Imposible saber dónde se debe guardar el token." & vbNewLine & vbNewLine & Err.Number & " - " & Err.Description
+        Traza lgFATAL, Err.Number & " " & Err.Description, "DDBB_Athena_file_data"
+        db = "ATHENA_NET_DATA.db"
+    End If
+End Function
+
+Function DDBB_Athena_file_data_dept(mailbox As String, Area_Dept_Cod As String) As String
+    On Error Resume Next
+    ' Puede que no esté definido el buzón por lo que se devolverá el genérico "ATHENA_NET_DATA.db"
+    DDBB_Athena_file_data_dept = "ATHENA_NET_DATA.db"
+    Dim ddbbDataFile As Variant
+    ddbbDataFile = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT(mailbox, Area_Dept_Cod), verbose)
+    If Not IsEmpty(ddbbDataFile) And VariantSize(ddbbDataFile) > 0 Then
+        DDBB_Athena_file_data_dept = ddbbDataFile(0)(1)
+    End If
+End Function
+
+
+Sub initLog(Optional overwrite As Boolean = False)
+    Athena_log = Format(Now, Athena_TimeStamp_Pattern) & "_ATHENA_LOGGER_" & getUserLogin & ".log"
+    Dim LOG_Athena_local_file_path As String: LOG_Athena_local_file_path = DDBB_Athena_local_file_path & "..\log\"
+    
+    Dim StrFileExists As String: StrFileExists = Dir(LOG_Athena_local_file_path, vbDirectory)
+    If StrFileExists = "" Then '"The selected path doesn't exist"
+        If verbose Then Debug.Print "Path not found. Creating " & LOG_Athena_local_file_path
+        MyMkDir LOG_Athena_local_file_path
+    End If
+    If (hayConexionRed(DDBB_Athena_file_path_remote)) Then
+        ' Subida del fichero de log personal a red cuando se cierre
+        Call copyLog(Athena_log, LOG_Athena_local_file_path, Athena_log_path)
+    End If
+    
+    ' Set up Logger
+    Set myLogger = Logging.getNewLogger("Athena")
+    Call myLogger.setLoggigParams(Logging.lgALL, False, False, True) 'nivel de traza,salidas consola, buffer, fichero
+    Call myLogger.setLogFile(LOG_Athena_local_file_path & Athena_log, overwrite) 'nombre de fichero, sobreescribir
+    Call myLogger.logINFO("User " & getUserLogin & " started up with version..." & ATHENA_VERSION, "initLog")
+    
+End Sub
+
+Function initUserPath(Optional overwrite_local_DB As Boolean = False, Optional initL As Boolean = False) As Integer
+    Dim res As Integer: res = 0
+    RutaLibAthena = DDBB_Athena_local_file_path & "..\lib\" ''' stored sqlite3.dll
+    
+    If (initL) Then Call initLog(True) ' Not initialized logs
+    
+    Dim hayConexion As Boolean: hayConexion = hayConexionRed(DDBB_Athena_file_path_remote)
+    If (hayConexion) Then
+        ' Brings _NET to local path
+        Call copyFileFromNet(DDBB_Athena_file, DDBB_Athena_file_path_remote, DDBB_Athena_local_file_path, overwrite_local_DB)
+        
+        ' Brings DLL's to local path
+        If overwrite_local_DB Then
+            #If Win64 Then
+                Call copyFileFromNet("sqlite3.dll", DDBB_Athena_file_path_remote & "lib\x64\", RutaLibAthena & "\x64\", overwrite_local_DB)
+            #Else
+                Call copyFileFromNet("sqlite3.dll", DDBB_Athena_file_path_remote & "lib\", RutaLibAthena, overwrite_local_DB)
+                Call copyFileFromNet("SQLite3_StdCall.dll", DDBB_Athena_file_path_remote & "lib\", RutaLibAthena, overwrite_local_DB)
+            #End If
+        End If
+        
+        'Check version to update local file
+        If Not checkVersion = ATHENA_VERSION Then
+            ' Brings .lnk installer to local path
+            Call copyFileFromNet(Athena_Install_file, Athena_Install_path, DDBB_Athena_local_file_path & "..\", overwrite_local_DB)
+            
+            'Call Shell("explorer.exe " & DDBB_Athena_local_file_path, vbNormalFocus)
+                    
+            Dim msg As String: msg = "No dispone de la última versión del Gestor de la Demanda." & vbNewLine & "Por favor: " & vbNewLine _
+                & vbNewLine & "1º. Cierre el outlook completamente." _
+                & vbNewLine & "2º. Ejecute el instalador ( " & DDBB_Athena_local_file_path & "..\" & Athena_Install_file & ")" _
+                & vbNewLine & vbNewLine & "Es OBLIGATORIA la actualización"
+                
+            MsgBox msg, vbCritical, "Project codename: ATHENA. Nueva versión"
+            If Not initL Then Err.Raise -99, "TaskManager Error", msg
+        End If
+
+        res = 0
+        If Not initL Then If Not hayConexionOutlook Then res = -1
+    Else
+        res = -1
+    End If
+On Error Resume Next
+    ' Remove Local Views
+    If (overwrite_local_DB) Then MkDir Athena_Get_MailBoxXMLPath("", True)
+    If (overwrite_local_DB) Then Kill Athena_Get_MailBoxXMLPath("", True) & "*"
+    
+    ' Upload usr local db file
+    If (overwrite_local_DB And hayConexion) Then doUploadUsrDB
+    
+    initUserPath = res
+End Function
+
+Sub doUploadUsrDB()
+On Error Resume Next
+    Dim hayConexion As Boolean: hayConexion = hayConexionRed(DDBB_Athena_file_path_remote)
+    Dim ddbb_file_dest As String: ddbb_file_dest = DDBB_Athena_file_data
+    If (hayConexion) Then
+        copyFileFromNet ddbb_file_dest, DDBB_Athena_file_path, DDBB_Athena_file_path_remote & "usr\", True
+    End If
+End Sub
+
+Sub dwnloadRemoteData(ddbb_file As String, Optional overwrite As Boolean = False)
+    If (hayConexionRed(DDBB_Athena_file_path_remote)) Then
+        copyFileFromNet ddbb_file, DDBB_Athena_file_path_remote, DDBB_Athena_local_file_path, overwrite
+    End If
+End Sub
+
+Function getQueryMailBoxBelongs() As String
+    getQueryMailBoxBelongs = "SELECT DISTINCT MAILBOX.EMAIL FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " _
+    & " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+    & " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE USER.USER_EMPLOYEE = '" & getUserLogin & "'"
+End Function
+
+Function getQueryMailBoxDBFileBelongs() As String
+    getQueryMailBoxDBFileBelongs = "SELECT DISTINCT COALESCE (AREA_DEPT.DDBB_DATA_FILE,MAILBOX.DDBB_DATA_FILE) FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " _
+    & " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+    & " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE USER.USER_EMPLOYEE = '" & getUserLogin & "'"
+End Function
+
+Public Sub breakConstraintPK(ddbb_dest As String)
+    ' Break PK Constraint at DUTY
+    Call DB_DDL(ddbb_dest, "ALTER TABLE DUTY RENAME TO DUTY1", verbose)
+    Call DB_DDL(ddbb_dest, "CREATE TABLE DUTY AS SELECT * FROM DUTY1", verbose)
+    Call DB_DDL(ddbb_dest, "DROP TABLE IF EXISTS DUTY1", verbose)
+End Sub
+
+Private Function prepareFileData(Optional dbData As String = "", Optional removeTable As Boolean = True) As String
+    Dim ddbb_file_dest As String
+    
+    ' Define dest file
+    If dbData = "" Then
+        ddbb_file_dest = "ATHENA_NET_DATA_" & Format(Now, Athena_TraceDate_Pattern) & ".db"
+    Else
+        ddbb_file_dest = dbData
+    End If
+    
+    ' Clear or Copy Blank?
+    If Len(Dir$(DDBB_Athena_local_file_path & ddbb_file_dest)) > 0 Then
+        If removeTable Then
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY_EVENT;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY_MATRIX;", verbose)
+        Else
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY_EVENT;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY_MATRIX;", verbose)
+        End If
+    Else
+        FileCopy DDBB_Athena_file_path_remote & "ATHENA_NET_DATA_EMPTY.db", DDBB_Athena_local_file_path & ddbb_file_dest
+    End If
+    
+    prepareFileData = ddbb_file_dest
+End Function
+
+Function dwnloadAllRemoteUsrData(Optional emailXml As String = "", Optional ddbb_file_data As String = "") As String
+    Dim ddbb_files As Variant
+    Dim i As Long
+    Dim ddbb_file_dest As String
+    ' *** 1º *** PREPARE
+    ' Prepare dest file //Clear structure if exists (False) //Copy blank if does not
+    ddbb_file_dest = prepareFileData(ddbb_file_data, False)
+    
+    ' Delete all prev existing usr data files locally
+    Call ClearDir(DDBB_Athena_local_file_path & "usr\", "*.db")
+    
+    ' *** 2º *** DATA
+    ' Get All employees id's under selected mailbox
+    Dim Sql As String: Sql = "SELECT DISTINCT UPPER(USER_EMPLOYEE)" & _
+                                " FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD "
+    If emailXml <> "" Then Sql = Sql & " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & emailXml & "'"
+                                
+    ' Query it at _NET file
+    ddbb_files = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(ddbb_files) And VariantSize(ddbb_files) > 0 Then
+        For i = 0 To UBound(ddbb_files)
+            ' Get Next employee id
+            If Not IsEmpty(ddbb_files(i)) Then
+                Dim ddbb_file As String: ddbb_file = "ATHENA_NET_DATA_" & ddbb_files(i)(0) & ".db"
+                Dim ddbb_file_id As String: ddbb_file_id = ddbb_files(i)(0)
+                
+                ' Check if exists remote usr data db file
+                If Len(Dir$(DDBB_Athena_file_path_remote & "usr\" & ddbb_file)) > 0 Then
+                    ' *** 2º/A *** DOWNLOAD
+                    ' Download it
+                    copyFileFromNet ddbb_file, DDBB_Athena_file_path_remote & "usr\", DDBB_Athena_local_file_path & "usr\"
+                    
+                    ' *** 2º/B *** APPEND INFO
+                    If i = 0 Then
+                        ' Create tables structure and data
+                        Call DB_UNIFY(DDBB_Athena_local_file_path & "usr\" & ddbb_file, DDBB_Athena_local_file_path & ddbb_file_dest, False, "", verbose)
+                        
+                        ' Drop pk constraint
+                        breakConstraintPK DDBB_Athena_local_file_path & ddbb_file_dest
+                    Else
+                        ' Append info (insert or replace it)
+                        Call DB_HIST_30(DDBB_Athena_local_file_path & ddbb_file_dest, DDBB_Athena_local_file_path & "usr\" & ddbb_file, verbose)
+                    End If
+                    
+                End If
+            End If
+        Next
+    End If
+    
+    ' *** 3º *** MANAGE DUPLICATE/NEWEST INFO
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "ALTER TABLE DUTY RENAME TO DUTY1;", verbose)
+    
+    Sql = "CREATE TABLE IF NOT EXISTS DUTY AS " & _
+            " SELECT DISTINCT D.* FROM DUTY1 D INNER JOIN " & _
+            " (SELECT DUTY_COD, MAX(LAST_EVENT_STAMP) as T FROM DUTY1 GROUP BY DUTY_COD) D2 " & _
+            " ON D.DUTY_COD = D2.DUTY_COD AND D.LAST_EVENT_STAMP = D2.T; "
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, Sql, verbose)
+    
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY1;", verbose)
+    
+    ' *** 4º *** APPEND _NET
+    ' Adds all static info
+    Call DB_MERGE(DDBB_Athena_local_file_path & DDBB_Athena_file, DDBB_Athena_local_file_path & ddbb_file_dest, verbose)
+    
+    ' *** 5º *** CLEAN
+    ' Delete all downloaded usr data files locally
+    Call ClearDir(DDBB_Athena_local_file_path & "usr\", "*.db")
+    
+    ' *** 6º *** RETURN
+    dwnloadAllRemoteUsrData = ddbb_file_dest
+End Function
+
+Function dwnloadAllRemoteData(Optional dbData As String = "") As String
+    Dim ddbb_files As Variant
+    Dim i As Long
+    Dim Sql As String
+    Dim ddbb_file_dest As String
+    
+    ' Prepare dest file //Delete structure if exists (True) //Copy blank if does not
+    prepareFileData dbData, True
+    
+    ' Check Dept db files
+    Sql = getQueryMailBoxDBFileBelongs
+    ddbb_files = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(ddbb_files) And VariantSize(ddbb_files) > 0 Then
+        For i = 0 To UBound(ddbb_files)
+            If Not IsEmpty(ddbb_files(i)) Then
+                Dim ddbb_file As String
+                Dim ddbb_file_id As String
+                ddbb_file = ddbb_files(i)(0)
+                Call dwnloadRemoteData(ddbb_file, True)
+                ddbb_file_id = Replace(Replace(ddbb_file, ".db", ""), "ATHENA_NET_DATA_", "")
+                
+                Call DB_UNIFY(DDBB_Athena_local_file_path & ddbb_file, DDBB_Athena_local_file_path & ddbb_file_dest, (i = 0), ddbb_file_id, verbose)
+            End If
+        Next
+        dwnloadAllRemoteData = DDBB_Athena_local_file_path & ddbb_file_dest
+    End If
+End Function
+
+Sub doHistorify(ddbb_data_unified As String)
+    ' DwnLoad Last Hist File
+    FileCopy DDBB_Athena_file_path_reporting & DDBB_Athena_file_data_HIST, DDBB_Athena_local_file_path & DDBB_Athena_file_data_HIST
+    
+    ' Historify
+    Call DB_HIST_30(DDBB_Athena_local_file_path & DDBB_Athena_file_data_HIST, ddbb_data_unified, verbose)
+End Sub
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' DATA MODEL - ATHENA - FORM QUERIES
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+'Dado un buzón, devuelve el nombre del fichero de la base de datos que contiene los datos
+Function ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME(mailbox As String) As String
+    ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME = "SELECT DDBB_DATA_FILE FROM MAILBOX LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD WHERE EMAIL = '" & mailbox & "' OR ALIAS_DESC = '" & mailbox & "';"
+End Function
+
+Function ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT(mailbox As String, Area_Dept_Cod As String) As String
+    ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT = "" _
+    & "SELECT 1, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+    & " FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE (MAILBOX.EMAIL = '" & mailbox & "' ) AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN " & Area_Dept_Cod & " ELSE AREA_DEPT.AREA_DEPT_COD END = " & Area_Dept_Cod _
+    & " union ALL " _
+    & " SELECT 2, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+    & " FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " _
+    & " WHERE (MAILBOX_ALIAS.ALIAS_DESC = '" & mailbox & "') AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN " & Area_Dept_Cod & " ELSE AREA_DEPT.AREA_DEPT_COD END = " & Area_Dept_Cod _
+    & " order by 1"
+End Function
+
+'Dado un buzón, devuelve la lista de sistemas asociados
+Function ATHENA_GET_QUERY_GET_AREA_DEPT(mailbox As String) As String
+    Dim query As String
+    query = "SELECT ad.dept,ad.area_dept_cod FROM MAILBOX_ALIAS ma, mailbox m, AREA_DEPT ad where ma.mailbox_cod = m.mailbox_cod And m.mailbox_cod = ad.mailbox_cod"
+    query = query & " and ma.alias_desc='" & mailbox & "'"
+    ATHENA_GET_QUERY_GET_AREA_DEPT = query
+End Function
+
+'Dado un sistema, devuelve una lista de paises asociados
+Function ATHENA_GET_QUERY_GET_COUNTRY(System As String) As String
+    Dim query As String
+    query = "SELECT DISTINCT U.UNIT, U.UNIT_COD " _
+            & " FROM AREA_UNIT_CATEGORY AUC, UNIT U, AREA_DEPT AD, CATEGORY C " _
+            & " WHERE AD.AREA_DEPT_COD = AUC.AREA_DEPT_COD AND U.UNIT_COD = AUC.UNIT_COD AND C.CAT_COD = AUC.CAT_COD AND AUC.POS_ORDER > -1 "
+    query = query & " AND AD.DEPT='" & System & "'"
+    
+    ATHENA_GET_QUERY_GET_COUNTRY = query
+End Function
+
+'Dado una categoría (CROSS), devuelve una lista de categorias asociadas según matriz reparto
+Function ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(area_dept_cat_cod As String, Optional isMatrix As Boolean = False) As String
+    Dim query As String: query = "SELECT DISTINCT " _
+        & " UNIT.UNIT AS TRANS_UNIT, " _
+        & " TRANS.AREA_DEPT_CAT_COD AS TRANS_ADC, " _
+        & " MATRIZ_REPARTO.PORCENTAJE AS PRCNT " & vbNewLine _
+        & " FROM " _
+        & " AREA_DEPT_CATEGORY_FULL LEFT JOIN MATRIZ_REPARTO ON AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD = MATRIZ_REPARTO.AREA_DEPT_CAT_COD " & vbNewLine _
+        & " LEFT JOIN UNIT ON MATRIZ_REPARTO.DEST_UNIT_COD = UNIT.UNIT_COD " & vbNewLine _
+        & " LEFT JOIN AREA_UNIT_CATEGORY AS TRANS ON (AREA_DEPT_CATEGORY_FULL.AREA_DEPT_COD = TRANS.AREA_DEPT_COD AND UNIT.UNIT_COD = TRANS.UNIT_COD AND AREA_DEPT_CATEGORY_FULL.CAT_COD = TRANS.CAT_COD) " & vbNewLine _
+        & " WHERE AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD = " & area_dept_cat_cod
+
+    If isMatrix Then query = Replace(query, " UNIT.UNIT AS TRANS_UNIT, ", "")
+    ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS = query
+End Function
+
+'Dado un sistema y paises, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORIES_FROM_UNITS_CATEGORY(Area_Dept_Cod As String, units As String, cat As String) As String
+    Dim n As Integer: n = Len(units) - Len(Replace(units, SEP_TOKEN, "")) + 1
+    Dim query As String: query = "SELECT DISTINCT" _
+        & " AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD, 1.0/" & n & " " _
+        & " FROM AREA_DEPT_CATEGORY_FULL " _
+        & " WHERE AREA_DEPT_CATEGORY_FULL.AREA_DEPT_COD = " & Area_Dept_Cod & " " _
+        & " AND AREA_DEPT_CATEGORY_FULL.UNIT in ( '" & Replace(units, SEP_TOKEN, "','") & "') " _
+        & " AND AREA_DEPT_CATEGORY_FULL.CAT = '" & cat & "' "
+
+    ATHENA_GET_QUERY_GET_CATEGORIES_FROM_UNITS_CATEGORY = query
+End Function
+
+'Dado un sistema y paises, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS(Area_Dept_Cod As String, units As Variant) As String
+    Dim queryFrom As String
+    Dim subQuery As String
+    Dim i As Integer
+    If VariantSize(units) > 0 Then
+        queryFrom = "SELECT DISTINCT Q1.CAT, Q1.AREA_DEPT_CAT_COD AS Q1ADC " ' , Q2.AREA_DEPT_CAT_COD AS Q2ADC, Q3.AREA_DEPT_CAT_COD AS Q3ADC
+        For i = 0 To UBound(units)
+            If i > 0 Then queryFrom = queryFrom & ", Q" & (i + 1) & ".AREA_DEPT_CAT_COD AS Q" & (i + 1) & "ADC "
+            If i > 0 Then subQuery = subQuery & vbNewLine & " INNER JOIN "
+            subQuery = subQuery & " (SELECT DISTINCT CAT, AREA_DEPT_CAT_COD FROM AREA_DEPT_CATEGORY_FULL WHERE AREA_DEPT_COD = " & Area_Dept_Cod & " AND UNIT = '" & units(i) & "') Q" & (i + 1)
+            If i > 0 Then subQuery = subQuery & " ON (Q" & i & ".CAT = Q" & (i + 1) & ".CAT) "
+        Next
+    End If
+    
+    ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS = queryFrom & " FROM " & vbNewLine & subQuery
+End Function
+
+'Dado un sistema y un pais, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORY(System As String, country As String) As String
+    Dim query As String
+    query = "SELECT C.CAT, AUC.AREA_DEPT_CAT_COD " _
+            & " FROM AREA_UNIT_CATEGORY AUC, UNIT U, AREA_DEPT AD, CATEGORY C " _
+            & " WHERE AD.AREA_DEPT_COD = AUC.AREA_DEPT_COD AND U.UNIT_COD = AUC.UNIT_COD AND C.CAT_COD = AUC.CAT_COD AND AUC.POS_ORDER > -1 "
+    query = query & " and ad.dept='" & System & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    query = query & " and u.unit='" & country & "'"  'Insertamos Pais
+    query = query & " order by pos_order"
+    
+    ATHENA_GET_QUERY_GET_CATEGORY = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_PRIORITY() As String
+    ATHENA_GET_QUERY_GET_PRIORITY = "SELECT PRIORITY, PRIORITY_COD FROM DUTY_PRIORITY"
+End Function
+
+Function ATHENA_GET_QUERY_GET_ORIGIN() As String
+    ATHENA_GET_QUERY_GET_ORIGIN = "SELECT ORIGIN, ORIGIN_COD FROM DUTY_ORIGIN"
+End Function
+
+Function ATHENA_GET_QUERY_GET_USER(System As String) As String
+    Dim query As String
+    query = "select user_name, u.user_cod, u.USER_EMPLOYEE from AREA_USER au, user u, role r, AREA_DEPT ad where au.area_dept_cod = ad.area_dept_cod And au.user_cod = u.user_cod And au.role_cod = r.role_cod"
+    query = query & " and ad.dept='" & System & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    
+    ATHENA_GET_QUERY_GET_USER = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USER_BY_COD(System_cod As String) As String
+    Dim query As String
+    query = "select user_name, u.user_cod, u.USER_EMPLOYEE from AREA_USER au, user u, role r, AREA_DEPT ad where au.area_dept_cod = ad.area_dept_cod And au.user_cod = u.user_cod And au.role_cod = r.role_cod"
+    query = query & " and ad.AREA_DEPT_COD='" & System_cod & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    
+    ATHENA_GET_QUERY_GET_USER_BY_COD = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD(user_cod As String) As String
+    Dim query As String
+    query = "select user_employee from user where user_cod='" & user_cod & "'"
+    ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USERCOD_BY_NUM_EMPLOYEE(num_employee As String) As String
+    Dim query As String
+    query = "select user_cod from user where user_employee='" & num_employee & "'"
+    ATHENA_GET_QUERY_GET_USERCOD_BY_NUM_EMPLOYEE = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USERNAME_BY_NUM_EMPLOYEE(num_employee As String) As String
+    Dim query As String
+    query = "select user_name from user where user_employee='" & num_employee & "'"
+    ATHENA_GET_QUERY_GET_USERNAME_BY_NUM_EMPLOYEE = query
+End Function
+
+
+Function ATHENA_GET_QUERY_GET_CLIENT() As String
+
+   ATHENA_GET_QUERY_GET_CLIENT = "SELECT CLIENT, CLIENT_COD FROM DUTY_CLIENT"
+   
+End Function
+ 
+Function ATHENA_GET_QUERY_GET_CLIENTCOD_BY_CLIENT(client As String) As String
+    Dim query As String
+    query = "select client_cod from duty_client where client='" & client & "'"
+    ATHENA_GET_QUERY_GET_CLIENTCOD_BY_CLIENT = query
+End Function
+
+'' Validate email address
+Public Function IsUserValidInMailBox(ByVal userEmployee As String, ByVal emialMailBox As String, ByVal isAdmin As Boolean, ByVal isSuper As Boolean) As Boolean
+On Error GoTo ErrHndlr
+    Dim infoCod As Variant
+    Dim query As String
+    query = "SELECT DISTINCT mailbox.email, user.user_employee, area_user.role_cod " & _
+            " FROM mailbox inner join area_dept on mailbox.mailbox_cod = area_dept.mailbox_cod " & _
+            " inner join area_user on area_dept.area_dept_cod = area_user.area_dept_cod " & _
+            " inner join user on area_user.user_cod = user.user_cod" & _
+            " WHERE user.user_employee='" & userEmployee & "' and mailbox.email='" & emialMailBox & "' AND "
+    If isAdmin = isSuper Then
+        If Not isAdmin Then query = query & " NOT "
+        query = query & " area_user.role_cod in (" & Athena_Role_AdminCod & "," & Athena_Role_SuperCod & ")"
+    Else
+        If isAdmin Then
+            query = query & " area_user.role_cod in (" & Athena_Role_AdminCod & ")"
+        Else
+            query = query & " area_user.role_cod in (" & Athena_Role_SuperCod & ")"
+        End If
+    End If
+    infoCod = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    If Not IsEmpty(infoCod) And VariantSize(infoCod) > 0 Then
+        IsUserValidInMailBox = (infoCod(0)(0) <> "")
+    End If
+ErrHndlr:
+End Function
+
+Function ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_DUTY_COD(duty_cod As String) As String
+    ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_DUTY_COD = "SELECT DISTINCT TOKEN_ENTRY_ID FROM DUTY WHERE DUTY_COD = '" & duty_cod & "';"
+End Function
+
+Function ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_USER_AND_STATUS(user_cod As Long, stat_cod As Long) As String
+    ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_USER_AND_STATUS = "SELECT DISTINCT TOKEN_ENTRY_ID FROM DUTY WHERE OWNER_COD=" & user_cod & " AND STATUS_COD=" & stat_cod & ""
+End Function
+
+Function ATHENA_GET_PLANNED_EXECUTED() As String
+    ATHENA_GET_PLANNED_EXECUTED = "SELECT DISTINCT AREA_DEPT_CAT_COD || '.' || `DESC` FROM DUTY_PLANNED_EXECUTED WHERE MARK_DAY = strftime ('%Y%m%d', date('now','localtime'));"
+End Function
+
+Function ATHENA_GET_DBS_FROM_MAILBOX(dir_buzon As String) As String
+    ATHENA_GET_DBS_FROM_MAILBOX = "SELECT DISTINCT CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+        & " FROM MAILBOX LEFT JOIN MAILBOX_ALIAS on MAILBOX.mailbox_cod = MAILBOX_ALIAS.mailbox_cod inner join AREA_DEPT on MAILBOX.mailbox_cod = AREA_DEPT.mailbox_cod " _
+        & " WHERE MAILBOX.email = '" & dir_buzon & "' OR MAILBOX_ALIAS.alias_desc = '" & dir_buzon & "'"
+End Function
+
+Function ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS(alias_buzon As String) As String
+    ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS = "SELECT DISTINCT MAILBOX.EMAIL " _
+        & " FROM MAILBOX LEFT JOIN MAILBOX_ALIAS on MAILBOX.mailbox_cod = MAILBOX_ALIAS.mailbox_cod " _
+        & " WHERE MAILBOX_ALIAS.alias_desc = '" & alias_buzon & "'"
+End Function
+
+Function ATHENA_GET_PLANNED_DUTIES(mail_box As String, launched_tasks As String) As String
+    ATHENA_GET_PLANNED_DUTIES = "SELECT DISTINCT " & _
+                                " AREA_DEPT.AREA_DEPT_COD " & _
+                                " , AREA_UNIT_CATEGORY.UNIT_COD " & _
+                                " , AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " , AREA_DEPT.DEPT " & _
+                                " , UNIT.UNIT " & _
+                                " , CATEGORY.CAT " & _
+                                " , DUTY_PLANNED.DESC " & _
+                                " , CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " & _
+                                " , COALESCE(DUTY_PLANNED.DETAIL, '') " & _
+                                " FROM DUTY_PLANNED " & _
+                                " INNER JOIN AREA_UNIT_CATEGORY ON DUTY_PLANNED.AREA_DEPT_CAT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_DEPT.AREA_DEPT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_COD " & _
+                                " INNER JOIN CATEGORY ON AREA_UNIT_CATEGORY.CAT_COD = CATEGORY.CAT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " & _
+                                " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " & _
+                                " INNER JOIN PLANN ON DUTY_PLANNED.PLANN_COD = PLANN.PLANN_COD " & _
+                                " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & mail_box & "' AND PLANN.PLANN_D = DATE('now', 'localtime')" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') <= strftime('%H:%M', datetime('now', 'localtime'))" & _
+                                " AND length(REPLACE( ',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',', ',' || PLANN.PLANN_CONDITION || ',', '')) < length(',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',') " & _
+                                " AND AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD || '.' || DUTY_PLANNED.DESC not in (" & launched_tasks & ")" & _
+                                " ORDER BY 8,7,4,5,3;"
+
+End Function
+
+Function ATHENA_GET_PLANNED_DUTIES_3_0(mail_box As String, last_time As String, now_time As String) As String
+    ATHENA_GET_PLANNED_DUTIES_3_0 = "SELECT DISTINCT " & _
+                                " AREA_DEPT.AREA_DEPT_COD " & _
+                                " , AREA_UNIT_CATEGORY.UNIT_COD " & _
+                                " , AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " , AREA_DEPT.DEPT " & _
+                                " , UNIT.UNIT " & _
+                                " , CATEGORY.CAT " & _
+                                " , DUTY_PLANNED.DESC " & _
+                                " , CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " & _
+                                " , COALESCE(DUTY_PLANNED.DETAIL, '') " & _
+                                " , IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') AS T_SCHEDULLE " & _
+                                " FROM DUTY_PLANNED " & _
+                                " INNER JOIN AREA_UNIT_CATEGORY ON DUTY_PLANNED.AREA_DEPT_CAT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_DEPT.AREA_DEPT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_COD " & _
+                                " INNER JOIN CATEGORY ON AREA_UNIT_CATEGORY.CAT_COD = CATEGORY.CAT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " & _
+                                " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " & _
+                                " INNER JOIN PLANN ON DUTY_PLANNED.PLANN_COD = PLANN.PLANN_COD " & _
+                                " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & mail_box & "' AND PLANN.PLANN_D = DATE('now', 'localtime')" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') <= '" & now_time & "'" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') > '" & last_time & "'" & _
+                                " AND length(REPLACE( ',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',', ',' || PLANN.PLANN_CONDITION || ',', '')) < length(',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',') " & _
+                                " ORDER BY 8, 10, 7,4,5,3;"
+
+End Function
+
+Function ATHENA_GET_PLANNED_DUTY_IDS(origin_cod As String, status_cod As String, t_stamp As String) As String
+    ATHENA_GET_PLANNED_DUTY_IDS = "SELECT DUTY_COD, TOKEN_ENTRY_ID, CAT_AREA_UNIT_COD, ORIGIN_COD, NAME, OWNER_COD FROM DUTY " & _
+                                    " WHERE ORIGIN_COD = " & origin_cod & _
+                                    " AND STATUS_COD = " & status_cod & _
+                                    " AND LAST_EVENT_STAMP = '" & t_stamp & "';"
+End Function
+
+Function ATHENA_GET_QUERY_UPD_DUTY(idDuty As String, area_dept_cat_cod As String, volume As String) As String
+    Dim updSQLTask As String
+    updSQLTask = "UPDATE DUTY SET `WHEN` = '" & Format(Now, Athena_FullTime_Pattern) & "' , who='" & getUserLogin & "' "
+    If area_dept_cat_cod <> "" Then updSQLTask = updSQLTask + ", cat_area_unit_cod = " & area_dept_cat_cod
+    If volume <> "" Then updSQLTask = updSQLTask + ", volume = " & volume
+    updSQLTask = updSQLTask & " WHERE DUTY_COD = '" & idDuty & "'"
+    ATHENA_GET_QUERY_UPD_DUTY = updSQLTask
+End Function
+
+Function ATHENA_GET_QUERY_INS_DUTY(EntryId As String, name As String, status_cod As Integer, cat_area_unit_cod As String, origin_cod As String, owner_cod As String, prior_cod As String, pk As String, volume As String, client As String, inc_op As String, notes As String) As String
+    ' New Task
+    Dim insSQLTask As String
+    insSQLTask = "INSERT INTO DUTY (TOKEN_ENTRY_ID, NAME, STATUS_COD, CAT_AREA_UNIT_COD, ORIGIN_COD, OWNER_COD, PRIOR_COD, LAST_EVENT_STAMP, PK, VOLUME, WHO, `WHEN`, CLIENT, IS_INC, VOLUMEN_ERR, COMENTARIOS) VALUES ('" & _
+     EntryId & "','" & clearString(name) & "', " & status_cod & ", " & cat_area_unit_cod & ", " & origin_cod & ", " & owner_cod & ", " & prior_cod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & pk & "', '" & volume & "', '" & getUserLogin & "', '" & Format(Now, Athena_FullTime_Pattern) & "','" & client & "', " & inc_op & "',null, '" & notes & "' "
+    ATHENA_GET_QUERY_INS_DUTY = insSQLTask
+End Function
+
+Function ATHENA_GET_QUERY_INS_PROJECT(user As String, project As String, comments_project As String, start_time As String, end_time As String) As String
+    ' New Task
+    Dim insSQLTask As String
+    insSQLTask = "INSERT INTO PROJECT (USER, PROJECT, START_TIME, END_TIME, COMMENTS) VALUES ('" & _
+     user & "','" & project & "', " & comments_project & "," & start_time & ", " & end_time & "' "
+    ATHENA_GET_QUERY_INS_PROJECT = insSQLTask
+End Function
+
+Function ATHENA_GET_QUERIES_INS_UPD_DUTY_EVENTS(idDuty As String, entry_id As String, event_time As String, area_dept_cat_cod As String, volumen As String) As String
+    Dim updSQLEvent As String
+    updSQLEvent = " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) "
+    If volumen <> "" Then updSQLEvent = updSQLEvent & " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(event_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', " & volumen & ", null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' "
+    If volumen <> "" And area_dept_cat_cod <> "" Then updSQLEvent = updSQLEvent & " UNION ALL "
+    If area_dept_cat_cod <> "" Then updSQLEvent = updSQLEvent & " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(event_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', " & area_dept_cat_cod & ", null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' "
+
+    ATHENA_GET_QUERIES_INS_UPD_DUTY_EVENTS = updSQLEvent
+End Function
+
+Function ATHENA_GET_QUERIES_INS_NEW_DUTY(idDuty As String, conversation_id As String, entry_id As String, duty_status As Integer, mail_stamp As String, creation_time As String, owner As String, Optional volumen As String = "", Optional area_dept_cat_cod As String = "", Optional t_end As String = "") As String
+    Dim insSQLEvent As String
+    ' New Request
+    insSQLEvent = "INSERT INTO REQUEST (DUTY_COD, CONVERSATION_ID) VALUES ( '" & idDuty & "', '" & conversation_id & "'); "
+    
+    ' TODO: Dejará de aplicar una vez aplicado los Triggers
+    ' Duty Events (Reduce 6 event trace to 1 Insert select)
+    '   Trace - Income mail
+    If duty_status = Athena_Mail_StatusCod_End And t_end <> "" Then 'Es ajuste de tiempo
+        insSQLEvent = insSQLEvent & vbNewLine & " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) " & _
+                                " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(mail_stamp, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'MAIL', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'TOKEN', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'DUTY', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & area_dept_cat_cod & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & volumen & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & Athena_Mail_StatusCod_Started & "', '1', null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_OwnershipCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & owner & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(t_end, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & Athena_Mail_StatusCod_End & "', '1', null, '" & Format(Now, Athena_FullTime_Pattern) & "';"
+    Else
+        insSQLEvent = insSQLEvent & vbNewLine & " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) " & _
+                                " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(mail_stamp, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'MAIL', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'TOKEN', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'DUTY', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & area_dept_cat_cod & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & volumen & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & duty_status & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_OwnershipCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & owner & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "';"
+    End If
+        
+    ' Remove PRE_TASK
+    insSQLEvent = insSQLEvent & vbNewLine & " DELETE FROM PRE_TASK WHERE CONVERSATION_ID = '" & conversation_id & "';"
+    
+    ATHENA_GET_QUERIES_INS_NEW_DUTY = insSQLEvent
+End Function
+
+' TODO: Dejará de aplicar una vez aplicado los Triggers
+Function ATHENA_GET_QUERIES_INS_NEW_DUTY_EVENT_PLANNED(origin_cod As String, duty_status_cod As String, t_stamp As String, owner_cod As String) As String
+    Dim insSQLEvent As String
+    
+    ' Duty Events (Reduce 6 event trace to 1 Insert select)
+    '   Trace - Income mail
+    insSQLEvent = " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, WHEN_STAMP) " & _
+    " SELECT DUTY.TOKEN_ENTRY_ID, DUTY.DUTY_COD, DUMMY_EVENT_NEW_DUTY.EVENT_CODE " & _
+        " , '" & t_stamp & "' " & _
+        " , '" & getUserLogin & "' " & _
+        " ,  CASE WHEN EVENT_CODE = " & Athena_Event_TraceCod & " THEN VALUE " & _
+            " WHEN EVENT_CODE = " & Athena_Event_VolumeCod & " THEN 0 " & _
+            " WHEN EVENT_CODE = " & Athena_Event_ActivityCod & " THEN " & duty_status_cod & " " & _
+            " WHEN EVENT_CODE = " & Athena_Event_OwnershipCod & " THEN " & owner_cod & " " & _
+            " ELSE 0 END " & _
+        " , '" & Format(Now, Athena_FullTime_Pattern) & "' " & _
+    " FROM DUTY, DUMMY_EVENT_NEW_DUTY " & _
+                                    " WHERE ORIGIN_COD = " & origin_cod & _
+                                    " AND STATUS_COD = " & duty_status_cod & _
+                                    " AND LAST_EVENT_STAMP = '" & t_stamp & "';"
+    
+    ATHENA_GET_QUERIES_INS_NEW_DUTY_EVENT_PLANNED = insSQLEvent
+End Function
+
+Function Athena_Get_AreaDeptCod_From_Token(areaDept As String, unit As String, category As String) As String
+On Error Resume Next
+    ' Puede que no esté definido el buzón por lo que se devolverá el genérico "ATHENA_NET_DATA.db"
+    Athena_Get_AreaDeptCod_From_Token = ""
+    Dim infoCod As Variant
+    Dim Sql As String
+    Sql = "SELECT AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD FROM " _
+            & " CATEGORY INNER JOIN AREA_UNIT_CATEGORY ON CATEGORY.CAT_COD = AREA_UNIT_CATEGORY.CAT_COD " _
+            & " INNER JOIN AREA_DEPT ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+            & " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " _
+            & " WHERE cat = '" & category & "' And DEPT = '" & areaDept & "' And unit = '" & unit & "'"
+
+    infoCod = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(infoCod) And VariantSize(infoCod) > 0 Then
+        Athena_Get_AreaDeptCod_From_Token = infoCod(0)(0)
+    End If
+End Function
+
+Function Athena_Get_All_AreaDeptCod_From_Token(areaDept As String, unit As String, category As String) As Variant
+On Error Resume Next
+    Dim Sql As String: Sql = "SELECT AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD, AREA_UNIT_CATEGORY.AREA_DEPT_COD, AREA_UNIT_CATEGORY.UNIT_COD, AREA_UNIT_CATEGORY.CAT_COD " _
+            & " FROM " _
+            & " CATEGORY INNER JOIN AREA_UNIT_CATEGORY ON CATEGORY.CAT_COD = AREA_UNIT_CATEGORY.CAT_COD " _
+            & " INNER JOIN AREA_DEPT ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+            & " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " _
+            & " WHERE cat = '" & category & "' And DEPT = '" & areaDept & "' And unit = '" & unit & "'"
+
+    Athena_Get_All_AreaDeptCod_From_Token = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+End Function
+
+Public Function Athena_Get_ViewXML_MailBox(mailbox As String) As String
+    Dim selMailBoxXML As String: selMailBoxXML = "SELECT VIEW_XML FROM MAILBOX WHERE MAILBOX='" & mailbox & "'"
+    Dim xmls As Variant: xmls = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, selMailBoxXML, verbose)
+    If Not IsEmpty(xmls) And VariantSize(xmls) > 0 Then
+        Athena_Get_ViewXML_MailBox = xmls(0)(0)
+    End If
+End Function
+
+Public Function Athena_Get_MailBoxEmail() As String
+On Error Resume Next
+    Dim mailbox As String
+    Dim emails As Variant: emails = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS(getMailBox()), verbose)
+    If Not IsEmpty(emails) And VariantSize(emails) > 0 Then
+        mailbox = emails(0)(0)
+    End If
+    Athena_Get_MailBoxEmail = mailbox
+End Function
+
+Public Function Athena_Get_MailBoxXMLPath(Optional email As String = "", Optional localPath As Boolean = True) As String
+    Dim mailboxXMLPath As String
+    
+    If localPath Then
+        mailboxXMLPath = DDBB_Athena_local_file_path & "..\views\" '& email & ".xml"
+    Else
+        mailboxXMLPath = DDBB_Athena_file_path_remote & "..\views\" '& email & ".xml"
+    End If
+    If email <> "" Then mailboxXMLPath = mailboxXMLPath & email
+    Athena_Get_MailBoxXMLPath = mailboxXMLPath
+End Function
+
