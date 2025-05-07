@@ -144,6 +144,7 @@ Public Sub listadoMetodos()
     Load_Units
     Load_Categories
     Load_Owner
+    Load_Canal
     
     quitaMarcaSinClasificar
     get_cod_by_desc athena_area_list, ""
@@ -186,6 +187,10 @@ End Sub
 
 
     
+Private Sub CanalComboBox1_Change()
+
+End Sub
+
     Private Sub CancelarButton_Click()
     ATHENA_GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
     LabelAsunto.Caption = ""
@@ -787,11 +792,32 @@ Public Sub Load_Client()
         Next item
         ClienteComboBox = GLOBAL_CLIENT
     End If
-
-
-
-
 End Sub
+
+Private Sub Load_Canal()
+    Dim result As Variant
+    result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, "SELECT CANAL_NAME FROM CANAL ORDER BY CANAL_NAME", verbose)
+    
+    With CanalComboBox
+        .Clear
+        If Not IsEmpty(result) Then
+            Dim i As Long
+            For i = 0 To UBound(result)
+                .AddItem result(i)(0)
+            Next
+        Else
+            .AddItem "Sin datos disponibles"
+        End If
+
+        ' Asignación automática si GLOBAL_CANAL ya tiene valor
+        If GLOBAL_CANAL <> "" Then
+            .value = GLOBAL_CANAL
+        Else
+            .ListIndex = 0
+        End If
+    End With
+End Sub
+
 
 Private Sub SistemaComboBox_Change()
     If ATHENA_GLOBAL_CONTROL <> ATHENA_CONTROL_CANCEL Then
