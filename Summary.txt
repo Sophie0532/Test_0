@@ -1,0 +1,18 @@
+Private Sub cargar_CanalComboBox()
+    Dim query As String
+    Dim canalList() As Variant
+    Dim item As Variant
+
+    query = ATHENA_GET_QUERY_GET_CANAL()
+    canalList = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+
+    CanalComboBox.Clear
+
+    If IsEmpty(canalList(0)) Then
+        CanalComboBox.AddItem info_not_found_err
+    Else
+        For Each item In canalList
+            CanalComboBox.AddItem item(0)
+        Next item
+    End If
+End Sub
