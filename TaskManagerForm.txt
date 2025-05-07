@@ -185,12 +185,6 @@ Private Sub resetear_variables()
 End Sub
 
 
-
-    
-Private Sub CanalComboBox1_Change()
-
-End Sub
-
     Private Sub CancelarButton_Click()
     ATHENA_GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
     LabelAsunto.Caption = ""
@@ -363,6 +357,14 @@ Public Sub AceptarButton_Click()
             GLOBAL_USER_COD = get_cod_by_desc(athena_user_list, RealizadorComboBox)
             GLOBAL_USER_EMPLOYEE = getUserEmployee("" & GLOBAL_USER_COD)
         End If
+        
+    'Canal
+    If CanalComboBox.ListIndex <> -1 Then
+        GLOBAL_CANAL = CanalComboBox.value
+    Else
+        FormError = FormError & vbNewLine & " *Seleccione un Canal"
+    End If
+    
     ElseIf Not EDIT_MODE Then ' Creating New Task / myself
         GLOBAL_USER = getUserName(getUserLogin)
         GLOBAL_USER_COD = getUserCod(getUserLogin)
@@ -444,7 +446,7 @@ Public Sub AceptarButton_Click()
                 GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
                 GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
                 GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, GLOBAL_COMMENT, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR, _
-                GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS)
+                GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS, GLOBAL_CANAL)
                 
                 
         'MODO EDICION
@@ -1206,4 +1208,5 @@ Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
         CancelarButton_Click
     End If
 End Sub
+
 
