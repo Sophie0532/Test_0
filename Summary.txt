@@ -16,3 +16,12 @@ Private Sub cargar_CanalComboBox()
         Next item
     End If
 End Sub
+
+***
+cargar_CanalComboBox
+
+If GLOBAL_CANAL <> "" Then
+    CanalComboBox.Value = GLOBAL_CANAL
+ElseIf CanalComboBox.ListCount > 0 Then
+    CanalComboBox.ListIndex = 0
+End If
