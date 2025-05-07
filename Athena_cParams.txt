@@ -798,6 +798,10 @@ Function ATHENA_GET_QUERY_GET_USER_BY_COD(System_cod As String) As String
     ATHENA_GET_QUERY_GET_USER_BY_COD = query
 End Function
 
+Function ATHENA_GET_QUERY_GET_CANAL() As String
+    ATHENA_GET_QUERY_GET_CANAL = "SELECT CANAL_NAME, CANAL_COD FROM CANAL"
+End Function
+
 Function ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD(user_cod As String) As String
     Dim query As String
     query = "select user_employee from user where user_cod='" & user_cod & "'"
