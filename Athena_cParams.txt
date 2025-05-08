@@ -110,6 +110,7 @@ Public Const CAMPO_NUM_ACTIONS_ERR = 23
 Public Const CAMPO_PK = 24
 Public Const CAMPO_TAG = 25
 Public Const CAMPO_MATRIX_UNITS = 26
+Public Const CAMPO_CANAL = 27
 'Public Const CAMPO_CLIENT_COD = 27
 'Public Const CAMPO_CLIENT = 28
 
@@ -146,6 +147,7 @@ Public Const TOKEN_CAT_COD = "area_dept_cat_cod"
 Public Const TOKEN_EVENTS_CAT = "events_Area_Dept_Cat"
 Public Const TOKEN_MATRIX_CAT_PRCT = "matrix_area_dept_cat"
 Public Const TOKEN_MATRIX_UNITS = "matrix_units"
+Public Const TOKEN_CANAL = "Canal"
 '''''Status
 Public Const TOKEN_STATUS = "token_categories"
 Public Const TOKEN_STATUS_COD = "status_cod"
@@ -252,6 +254,8 @@ Public Const Athena_Column_Dept = ".Dept"
 Public Const Athena_Column_Priority = ".Priority"
 Public Const Athena_Column_Comm = ".Comment"
 Public Const Athena_Column_Time = ".Time"
+Public Const Athena_Column_canal = ".Canal"
+
 
 '''' Plannification
 Public Const Athena_Folder_Plann = ":Planificadas"
