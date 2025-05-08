@@ -1,24 +1,3 @@
-Option Explicit
-
-Public token As Outlook.mailItem
-Public oMail As Outlook.mailItem
-Public EDIT_MODE As Boolean
-
-Private notFirst_Iteration As Boolean
-
-Private athena_area_list() As Variant
-Private athena_country_list() As Variant
-Private athena_priority_list() As Variant
-Private athena_category_list() As Variant
-Private athena_matrix_list As Variant
-Private athena_user_list() As Variant
-Private athena_client_list() As Variant
-Private athena_origin_list() As Variant
-
-'inputs
-Public GLOBAL_MAILBOX As String
-Public GLOBAL_TITLE_ORIGINAL As String
-
 'Outputs SN
 Public GLOBAL_CONTROL As Integer
 Public GLOBAL_INC_OP As String
@@ -33,8 +12,8 @@ Public GLOBAL_TITLE_FULL As String    'Title + comment
 Public GLOBAL_NUM_ACTIONS As String
 Public GLOBAL_AREA As String
 Public GLOBAL_AREA_COD As String
-Public GLOBAL_COUNTRY As String
-Public GLOBAL_COUNTRY_COD As String
+'Public GLOBAL_COUNTRY As String
+'Public GLOBAL_COUNTRY_COD As String
 Public GLOBAL_CATEGORY As String
 Public GLOBAL_CATEGORY_COD As String
 Public GLOBAL_TIME_ADJUST As Boolean
@@ -56,7 +35,7 @@ Public GLOBAL_MAIL_STAMP As String 'marca de recepción del correo sobre el que 
 Public GLOBAL_COMMENT As String
 Public GLOBAL_PK As String
 Public GLOBAL_TAG As String
-Public GLOBAL_MATRIX_UNITS As String
+'Public GLOBAL_MATRIX_UNITS As String
 Public GLOBAL_INDEX_LIST As Variant
 
 Private Const Window_Height = 500
@@ -184,6 +163,10 @@ Private Sub resetear_variables()
 End Sub
 
 
+Private Sub CanalComboBox_Change()
+
+End Sub
+
     Private Sub CancelarButton_Click()
     ATHENA_GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
     LabelAsunto.Caption = ""
@@ -287,27 +270,31 @@ Public Sub AceptarButton_Click()
     End If
     
     ' Unit
-    If PaisListBoxSel.ListCount <= 0 Then
-        FormError = FormError & vbNewLine & " * Indique un Pais. "
-    Else
-        GLOBAL_MATRIX_UNITS = ""
-        If MultiUnitCheckBox Or PaisListBox = UNIT_CROSS Then
-            GLOBAL_COUNTRY = UNIT_CROSS
-            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, UNIT_CROSS)
+    'If PaisListBoxSel.ListCount <= 0 Then
+        'FormError = FormError & vbNewLine & " * Indique un Pais. "
+    'Else
+        'GLOBAL_MATRIX_UNITS = ""
+        'If MultiUnitCheckBox Or PaisListBox = UNIT_CROSS Then
+            'GLOBAL_COUNTRY = UNIT_CROSS
+            'GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, UNIT_CROSS)
             
-            ' Matrix (Multi Unit Or Cross //Matriz reparto)
-            Dim i As Integer
-            For i = 0 To PaisListBoxSel.ListCount - 1
-                GLOBAL_MATRIX_UNITS = GLOBAL_MATRIX_UNITS & PaisListBoxSel.List(i) & SEP_TOKEN
-            Next
-            GLOBAL_MATRIX_UNITS = Left(GLOBAL_MATRIX_UNITS, Len(GLOBAL_MATRIX_UNITS) - 1)
-            If Athena_Token_get_Matrix_Units(token) <> GLOBAL_MATRIX_UNITS Then doChange = True
-        Else
-            GLOBAL_COUNTRY = PaisListBoxSel.List(0)
-            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBoxSel.List(0))
-        End If
-        If Athena_Token_get_Country(token) <> GLOBAL_COUNTRY Then doChange = True
-    End If
+            '' Matrix (Multi Unit Or Cross //Matriz reparto)
+            'Dim i As Integer
+            'For i = 0 To PaisListBoxSel.ListCount - 1
+                'GLOBAL_MATRIX_UNITS = GLOBAL_MATRIX_UNITS & PaisListBoxSel.List(i) & SEP_TOKEN
+            'Next
+            'GLOBAL_MATRIX_UNITS = Left(GLOBAL_MATRIX_UNITS, Len(GLOBAL_MATRIX_UNITS) - 1)
+            'If Athena_Token_get_Matrix_Units(token) <> GLOBAL_MATRIX_UNITS Then doChange = True
+        'Else
+            'GLOBAL_COUNTRY = PaisListBoxSel.List(0)
+            'GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBoxSel.List(0))
+        'End If
+        'If Athena_Token_get_Country(token) <> GLOBAL_COUNTRY Then doChange = True
+    'End If
+    
+    GLOBAL_COUNTRY = ""
+    GLOBAL_COUNTRY_COD = "-1"
+    GLOBAL_MATRIX_UNITS = ""
     
     ' Category
     If CategoriaListBox.ListIndex = -1 Then ' Invalid pointer
@@ -519,6 +506,7 @@ ErrHndlr:
 
 End Sub
 
+
 Private Sub OriginComboBox_Change()
 
 End Sub
@@ -564,6 +552,21 @@ Private Sub ponMarcaSinClasificar()
 End Sub
 
 Private Sub UserForm_Activate()
+
+    ' Posicionar en pantalla - ocultar country
+    StartUpPosition = 0
+    Left = 0
+    Top = 0
+    
+    ' Ocultar elementos visuales de country y multitask
+    On Error Resume Next
+    PaisFrame.Visible = False
+    MultiUnitCheckBox.Visible = False
+    PaisListBox.Visible = False
+    PaisListBoxSel.Visible = False
+    On Error GoTo 0
+        
+    
     formateaFormulario
     
     notFirst_Iteration = True
@@ -897,6 +900,7 @@ Private Sub Load_Units()
             PaisListBox.ListIndex = 0
             GLOBAL_COUNTRY = PaisListBox.List(PaisListBox.ListIndex)
             GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBox.List(PaisListBox.ListIndex))
+            
             '' Comentado ya que genera doble unidad
             ''PaisListBoxSel.AddItem PaisListBox.List(PaisListBox.ListIndex)
             ''Load_Categories
