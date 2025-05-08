@@ -4,7 +4,6 @@
 
 
 
-
 'inputs
 Public token As Outlook.mailItem
 'outputs
@@ -58,7 +57,7 @@ Private Sub CancelarButton_Click()
     GLOBAL_USER = ""
     GLOBAL_USER_COD = -1
     GLOBAL_USER_EMPLOYEE = ""
-    NotesTextBox = ""
+    NotesTextBox.text = ""
     cierraFormulario
 End Sub
 
