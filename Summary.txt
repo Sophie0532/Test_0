@@ -1,4 +1,5 @@
-Private Sub Athena_Token_check_canal_json(ByRef jsonDict As Dictionary, canal As String)
-    Athena_Token_init_canal_json jsonDict
-    If jsonDict(TOKEN_CANAL) <> canal And canal <> "" Then jsonDict(TOKEN_CANAL) = canal
+Public Sub Athena_Mail_set_canal(ByRef token As Outlook.mailItem, canal As String)
+    If canal <> "" Then token.UserProperties.Add Athena_Column_Canal, olText, True
+    token.UserProperties(Athena_Column_Canal).Value = canal
+    token.Save
 End Sub
