@@ -193,8 +193,8 @@ End Sub
     ATHENA_GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
     LabelAsunto.Caption = ""
     SistemaComboBox.ListIndex = -1
-    PaisListBox.ListIndex = -1
-    PaisListBoxSel.ListIndex = -1
+    'PaisListBox.ListIndex = -1
+    'PaisListBoxSel.ListIndex = -1
     PriorityComboBox.ListIndex = -1
     CategoriaListBox.ListIndex = -1
     ClienteComboBox.ListIndex = -1
@@ -319,22 +319,29 @@ Public Sub AceptarButton_Click()
     'GLOBAL_MATRIX_UNITS = ""
     
     ' Category
-    If CategoriaListBox.ListIndex = -1 Then ' Invalid pointer
+    'If CategoriaListBox.ListIndex = -1 Then ' Invalid pointer
+        'FormError = FormError & vbNewLine & " * Seleccione una Categoria. "
+    'ElseIf CategoriaListBox <> Athena_Token_get_Categoria(token) Or doChange Then ' New Category selected
+        'GLOBAL_CATEGORY = CategoriaListBox
+        'If MultiUnitCheckBox Then
+            'GLOBAL_CATEGORY_COD = "-1"
+        'Else
+            'GLOBAL_CATEGORY_COD = get_cod_by_desc(athena_category_list, CategoriaListBox)
+        'End If
+        'doChange = True
+    If CategoriaListBox.ListIndex = -1 Then
         FormError = FormError & vbNewLine & " * Seleccione una Categoria. "
-    ElseIf CategoriaListBox <> Athena_Token_get_Categoria(token) Or doChange Then ' New Category selected
-        GLOBAL_CATEGORY = CategoriaListBox
-        If MultiUnitCheckBox Then
-            GLOBAL_CATEGORY_COD = "-1"
-        Else
-            GLOBAL_CATEGORY_COD = get_cod_by_desc(athena_category_list, CategoriaListBox)
-        End If
-        doChange = True
     Else
-        GLOBAL_CATEGORY = Athena_Token_get_Categoria(token) ' Existing one
-        GLOBAL_CATEGORY_COD = Athena_Token_get_AreaDeptCategoriaCod(token)
+        GLOBAL_CATEGORY = CategoriaListBox
+        GLOBAL_CATEGORY_COD = athena_category_list(CategoriaListBox.ListIndex)(0)
+        doChange = True
+    
+    'Else
+        'GLOBAL_CATEGORY = Athena_Token_get_Categoria(token) ' Existing one
+        'GLOBAL_CATEGORY_COD = Athena_Token_get_AreaDeptCategoriaCod(token)
     End If
     
-    GLOBAL_POSTPONED = NoInitCheckBox
+    'GLOBAL_POSTPONED = NoInitCheckBox
     
     ' Time Adjust
     GLOBAL_TIME_ADJUST = AjusteTiempoCheckBox
@@ -580,13 +587,9 @@ Private Sub UserForm_Activate()
     Left = 0
     Top = 0
     
-    ' Ocultar elementos visuales de country y multitask
-    'On Error Resume Next
-    'PaisFrame.Visible = False
-    'MultiUnitCheckBox.Visible = False
-    'PaisListBox.Visible = False
-    'PaisListBoxSel.Visible = False
-    'On Error GoTo 0
+    CategoriaListBox.Visible = True
+    CategoriaListBox.Width = 150
+    CategoriaListBox.Height = 100
         
     
     formateaFormulario
@@ -948,34 +951,51 @@ End Sub
 
 Private Sub Load_Categories()
     
-    Dim query As String
-    If Not MultiUnitCheckBox And PaisListBox.ListIndex > -1 Then query = ATHENA_GET_QUERY_GET_CATEGORY(SistemaComboBox, PaisListBox.List(PaisListBox.ListIndex))
-    If MultiUnitCheckBox And PaisListBoxSel.ListCount > 0 Then
+    'Dim query As String
+    'If Not MultiUnitCheckBox And PaisListBox.ListIndex > -1 Then query = ATHENA_GET_QUERY_GET_CATEGORY(SistemaComboBox, PaisListBox.List(PaisListBox.ListIndex))
+    'If MultiUnitCheckBox And PaisListBoxSel.ListCount > 0 Then
         
-        Dim units As String: units = PaisListBoxSel.List(0)
-        Dim i As Integer
-        For i = 1 To PaisListBoxSel.ListCount - 1
-            units = units & "," & PaisListBoxSel.List(i)
-        Next
-        query = ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS(get_cod_by_desc(athena_area_list, SistemaComboBox), VBA.Split(units, ","))
-    End If
-    If query <> "" Then
-        CategoriaListBox.Clear
-        athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+        'Dim units As String: units = PaisListBoxSel.List(0)
+        'Dim i As Integer
+        'For i = 1 To PaisListBoxSel.ListCount - 1
+            'units = units & "," & PaisListBoxSel.List(i)
+        'Next
+        'query = ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS(get_cod_by_desc(athena_area_list, SistemaComboBox), VBA.Split(units, ","))
+    'End If
+    'If query <> "" Then
+        'CategoriaListBox.Clear
+        'athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
         
-        Dim item As Variant
-        If IsEmpty(athena_category_list(0)) Then
-           CategoriaListBox.AddItem info_not_found_err
-        Else
-           Dim EnLista As Boolean: EnLista = False
-           For Each item In athena_category_list
-               CategoriaListBox.AddItem item(0)
-               If Not token Is Nothing Then If item(0) = Athena_Token_get_Categoria(token) Then EnLista = True
-           Next item
-           If (EDIT_MODE And EnLista) Then CategoriaListBox = Athena_Token_get_Categoria(token)
-        End If
+        'Dim item As Variant
+        'If IsEmpty(athena_category_list(0)) Then
+           'CategoriaListBox.AddItem info_not_found_err
+        'Else
+           'Dim EnLista As Boolean: EnLista = False
+           'For Each item In athena_category_list
+               'CategoriaListBox.AddItem item(0)
+               'If Not token Is Nothing Then If item(0) = Athena_Token_get_Categoria(token) Then EnLista = True
+           'Next item
+           'If (EDIT_MODE And EnLista) Then CategoriaListBox = Athena_Token_get_Categoria(token)
+        'End If
+    'End If
+        Dim query As String
+    CategoriaListBox.Clear
+    CategoriaListBox.Visible = True
+
+    ' Consulta para obtener todas las categorías sin importar área/unidad
+    query = "SELECT TRIM(CAT_1) || ' # ' || TRIM(CAT_2) || ' # ' || TRIM(CAT_3) AS CAT FROM CATEGORY_DUTY ORDER BY CAT;"
+
+    ' Ejecuta la consulta
+    athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+
+    ' Verifica si hay resultados
+    If IsEmpty(athena_category_list(0)) Then
+        CategoriaListBox.AddItem "No hay categorías"
+    Else
+        For Each item In athena_category_list
+            CategoriaListBox.AddItem item(0)
+        Next item
     End If
-    
 End Sub
 
 Private Sub PaisListBoxSel_Click()
