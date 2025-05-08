@@ -77,6 +77,7 @@ On Error GoTo ErrHndlr
         Athena_Mail_set_title token, campos(CAMPO_TITLE_FULL)
         Athena_Mail_set_status token, duty_status
         Athena_Mail_set_priority token, campos(CAMPO_PRIORITY)
+        Athena_Mail_set_canal token, "" & campos(CAMPO_CANAL)
         'Athena_Mail_set_client token, campos(CAMPO_CLIENT)
 
     Else
@@ -110,6 +111,7 @@ Private Sub Athena_Token_Update_JSON(ByRef token As Outlook.mailItem, ByRef json
     Athena_Token_check_volumen_json jsonDict, "" & campos(CAMPO_NUM_ACTIONS)
     Athena_Token_check_origin_json jsonDict, "" & campos(CAMPO_ORIGIN), "" & campos(CAMPO_ORIGIN_COD)
     Athena_Token_check_notes_json jsonDict, "" & campos(CAMPO_COMMENT)
+    Athena_Token_check_canal_json jsonDict, "" & campos(CAMPO_CANAL)
     
     'Check Status
     If CBool(campos(CAMPO_TIME_ADJUST)) Then
@@ -143,6 +145,7 @@ Sub Athena_Token_edit_json(ByRef token As Outlook.mailItem, campos() As String)
    ' Athena_Token_check_client_json jsonDict, "" & campos(CAMPO_CLIENT), "" & campos(CAMPO_CLIENT_COD)
     Athena_Token_check_volumen_json jsonDict, "" & campos(CAMPO_NUM_ACTIONS)
     Athena_Token_check_notes_json jsonDict, "" & campos(CAMPO_COMMENT)
+    Athena_Token_check_canal_json jsonDict, "" & campos(CAMPO_CANAL)
     
     Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
     
@@ -157,6 +160,7 @@ Sub Athena_Token_edit_json(ByRef token As Outlook.mailItem, campos() As String)
     
     token.BodyFormat = olFormatRichText
     token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
+    Athena_Mail_set_canal token, "" & campos(CAMPO_CANAL)
     token.Save
     
     Set jsonDict = Nothing
@@ -222,7 +226,10 @@ Private Sub Athena_Token_init_client_json(ByRef jsonDict As Dictionary)
     If Not jsonDict.Exists(TOKEN_CLIENT) Then jsonDict.Add TOKEN_CLIENT, ""
     
 End Sub
-
+Private Sub Athena_Token_init_canal_json(ByRef jsonDict As Dictionary)
+    If Not jsonDict.Exists(TOKEN_CANAL) Then jsonDict.Add TOKEN_CANAL, ""
+    
+End Sub
 Private Sub Athena_Token_init_owner_json(ByRef jsonDict As Dictionary)
     If Not jsonDict.Exists(TOKEN_OWNER) Then jsonDict.Add TOKEN_OWNER, getUserLogin
     If Not jsonDict.Exists(TOKEN_OWNER_COD) Then jsonDict.Add TOKEN_OWNER_COD, getUserCod(jsonDict(TOKEN_OWNER))
@@ -428,7 +435,12 @@ Private Sub Athena_Token_check_db_json(ByRef jsonDict As Dictionary, mailbox As 
     If (jsonDict(TOKEN_DB_FILE) = "" Or jsonDict(TOKEN_DB_FILE) = "ATHENA_NET_DATA.db") And jsonDict(TOKEN_MAILBOX) <> "" And jsonDict(TOKEN_AREA_COD) <> "" Then jsonDict(TOKEN_DB_FILE) = DDBB_Athena_file_data_dept(jsonDict(TOKEN_MAILBOX), jsonDict(TOKEN_AREA_COD))
     If jsonDict(TOKEN_SYNCHRO) = "" Then jsonDict(TOKEN_SYNCHRO) = "N"
 End Sub
-
+Private Sub Athena_Token_check_canal_json(ByRef jsonDict As Dictionary, canal As String)
+    Athena_Token_init_canal_json jsonDict
+    If jsonDict(TOKEN_CANAL) <> canal And canal <> "" Then
+        jsonDict(TOKEN_CANAL) = canal
+    End If
+End Sub
 Private Sub Athena_Token_check_tags(ByRef jsonDict As Dictionary, pk As String, tag As String)
 On Error GoTo ErrHndlr
     Athena_Token_init_marks_json jsonDict
@@ -1842,3 +1854,4 @@ ErrHndlr:
     If Len(tEnd) <> 5 Then tEnd = "00:00"
     getPlannTokenLastTime = tEnd
 End Function
+
