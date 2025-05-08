@@ -1854,4 +1854,3 @@ ErrHndlr:
     If Len(tEnd) <> 5 Then tEnd = "00:00"
     getPlannTokenLastTime = tEnd
 End Function
-
