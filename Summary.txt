@@ -1,8 +1,17 @@
-    ' Ocultar controles de país y multitarea
-    If Not PaisListBox Is Nothing Then PaisListBox.Visible = False
-    If Not PaisListBoxSel Is Nothing Then PaisListBoxSel.Visible = False
-    If Not MultiUnitCheckBox Is Nothing Then
-        MultiUnitCheckBox.Visible = False
-        MultiUnitCheckBox.Enabled = False
+    Dim query As String
+    CategoriaListBox.Clear
+
+    ' Consulta para obtener todas las categorías sin importar área/unidad
+    query = "SELECT TRIM(CAT_1) || ' # ' || TRIM(CAT_2) || ' # ' || TRIM(CAT_3) AS CAT FROM CATEGORY_DUTY ORDER BY CAT;"
+
+    ' Ejecuta la consulta
+    athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+
+    ' Verifica si hay resultados
+    If IsEmpty(athena_category_list(0)) Then
+        CategoriaListBox.AddItem "No hay categorías"
+    Else
+        For Each item In athena_category_list
+            CategoriaListBox.AddItem item(0)
+        Next item
     End If
-    If Not PaisFrame Is Nothing Then PaisFrame.Visible = False
