@@ -392,3 +392,5 @@ Public Function calc_reporting_myself(ddbb_dest As String, who As String) As Str
     If alertaAbiertas Then msg = msg & vbNewLine & vbNewLine & "!!!!!ATENCIÓN TIENE TAREAS ABIERTAS!!!!!"
     calc_reporting_myself = msg
 End Function
+
+
