@@ -1,4 +1,5 @@
 
+
 'inputs
 Public token As Outlook.mailItem
 
@@ -39,7 +40,7 @@ Private Sub CancelarButton_Click()
     GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
     GLOBAL_INC_OP = ""
     GLOBAL_NUM_ACTIONS_ERR = ""
-    NotesTextBox = ""
+    NotesTextBox.text = ""
     TotalVolumenLabel.Caption = "/ 1"
     
     cierraFormulario
