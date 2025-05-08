@@ -1,5 +1,97 @@
-Public Sub Athena_Mail_set_canal(ByRef token As Outlook.mailItem, canal As String)
-    If canal <> "" Then token.UserProperties.Add Athena_Column_Canal, olText, True
-    token.UserProperties(Athena_Column_Canal).Value = canal
-    token.Save
+
+
+
+
+
+
+
+
+
+'inputs
+Public token As Outlook.mailItem
+
+'outputs
+Public GLOBAL_CONTROL As Integer
+Public GLOBAL_INC_OP As String
+Public GLOBAL_NUM_ACTIONS_ERR As String
+Public GLOBAL_NOTES As String
+Public GLOBAL_COMUNICA As String
+
+
+Private Sub AceptarButton_Click()
+    Dim msgErr As String: msgErr = ""
+    GLOBAL_CONTROL = ATHENA_CONTROL_OK
+    GLOBAL_NOTES = NotesTextBox.text
+    
+    If IncOpCheckBox Then
+        GLOBAL_INC_OP = "1"
+        GLOBAL_NUM_ACTIONS_ERR = AccionesTextBox.text
+        GLOBAL_COMUNICA = Trim(TicketIDTextBox.text)
+        If Not esNumeroAccionesValido(GLOBAL_NUM_ACTIONS_ERR) Then msgErr = msgErr & vbNewLine & " * N. Actuaciones Error. Valor introducido no valido. "
+    Else
+        GLOBAL_INC_OP = ""
+        GLOBAL_NUM_ACTIONS_ERR = ""
+        GLOBAL_COMUNICA = ""
+    End If
+    If msgErr <> "" Then
+        MsgBox msgErr, vbCritical, "Rellene con atención el formulario"
+    Else
+        Athena_Token_set_Incident token, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR, GLOBAL_NOTES, GLOBAL_COMUNICA
+        If Not IncOpCheckBox Then msgErr = "des"
+        MsgBox "Tarea " & msgErr & "marcada!", vbOKOnly, "Marcaje Incidencia Op"
+        cierraFormulario
+    End If
 End Sub
+
+Private Sub CancelarButton_Click()
+    GLOBAL_CONTROL = ATHENA_CONTROL_CANCEL
+    GLOBAL_INC_OP = ""
+    GLOBAL_NUM_ACTIONS_ERR = ""
+    NotesTextBox = ""
+    TotalVolumenLabel.Caption = "/ 1"
+    
+    cierraFormulario
+End Sub
+
+
+
+Private Sub IncOpFrame_Click()
+
+End Sub
+
+Private Sub TicketIDTextBox_Change()
+
+End Sub
+
+Private Sub TotalVolumenLabel_Click()
+
+End Sub
+
+Private Sub UserForm_Terminate()
+    Call CancelarButton_Click
+End Sub
+
+Private Sub cierraFormulario()
+    Me.Hide
+End Sub
+
+Private Sub UserForm_Activate()
+
+    'colocamos la ventana en la esquina superior izquierda
+    StartUpPosition = 0
+    Left = 0
+    Top = 0
+    TotalVolumenLabel.Caption = "/ " & Athena_Token_get_Volume(Me.token)
+    
+    If Athena_Token_get_incident(Me.token) = "1" Then
+        IncOpCheckBox = True
+        AccionesTextBox = Athena_Token_get_volumen_error(Me.token)
+        TicketIDTextBox = Athena_Token_get_comunica(Me.token)
+    Else
+        IncOpCheckBox = False
+        AccionesTextBox = "1"
+        TicketIDTextBox = ""
+    End If
+    
+End Sub
+
