@@ -1,3 +1,25 @@
+
+Option Explicit
+
+Public token As Outlook.mailItem
+Public oMail As Outlook.mailItem
+Public EDIT_MODE As Boolean
+
+Private notFirst_Iteration As Boolean
+
+Private athena_area_list() As Variant
+Private athena_country_list() As Variant
+Private athena_priority_list() As Variant
+Private athena_category_list() As Variant
+Private athena_matrix_list As Variant
+Private athena_user_list() As Variant
+Private athena_client_list() As Variant
+Private athena_origin_list() As Variant
+
+'inputs
+Public GLOBAL_MAILBOX As String
+Public GLOBAL_TITLE_ORIGINAL As String
+
 'Outputs SN
 Public GLOBAL_CONTROL As Integer
 Public GLOBAL_INC_OP As String
@@ -143,7 +165,7 @@ Private Sub resetear_variables()
     GLOBAL_TITLE_FULL = ""
     GLOBAL_NUM_ACTIONS = ""
     GLOBAL_AREA = ""
-    GLOBAL_COUNTRY = ""
+    'GLOBAL_COUNTRY = ""
     GLOBAL_CATEGORY = ""
     GLOBAL_TIME_ADJUST = False
     GLOBAL_TIME_START = ""
@@ -292,9 +314,9 @@ Public Sub AceptarButton_Click()
         'If Athena_Token_get_Country(token) <> GLOBAL_COUNTRY Then doChange = True
     'End If
     
-    GLOBAL_COUNTRY = ""
-    GLOBAL_COUNTRY_COD = "-1"
-    GLOBAL_MATRIX_UNITS = ""
+    'GLOBAL_COUNTRY = ""
+    'GLOBAL_COUNTRY_COD = "-1"
+    'GLOBAL_MATRIX_UNITS = ""
     
     ' Category
     If CategoriaListBox.ListIndex = -1 Then ' Invalid pointer
@@ -427,12 +449,12 @@ Public Sub AceptarButton_Click()
         MsgBox FormError, vbCritical, "Rellene con atención el formulario"
     Else
         formVars = StringArray(GLOBAL_TITLE_FULL, GLOBAL_NUM_ACTIONS, _
-                GLOBAL_AREA_COD, GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
+                GLOBAL_AREA_COD, "-1", GLOBAL_CATEGORY_COD, _
                 GLOBAL_TIME_ADJUST, GLOBAL_TIME_START, GLOBAL_TIME_END, _
                 GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
-                GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
+                GLOBAL_AREA, "", GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
                 GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, GLOBAL_COMMENT, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR, _
-                GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS, GLOBAL_CANAL)
+                GLOBAL_PK, GLOBAL_TAG, "", GLOBAL_CANAL)
                 
                 
         'MODO EDICION
@@ -559,12 +581,12 @@ Private Sub UserForm_Activate()
     Top = 0
     
     ' Ocultar elementos visuales de country y multitask
-    On Error Resume Next
-    PaisFrame.Visible = False
-    MultiUnitCheckBox.Visible = False
-    PaisListBox.Visible = False
-    PaisListBoxSel.Visible = False
-    On Error GoTo 0
+    'On Error Resume Next
+    'PaisFrame.Visible = False
+    'MultiUnitCheckBox.Visible = False
+    'PaisListBox.Visible = False
+    'PaisListBoxSel.Visible = False
+    'On Error GoTo 0
         
     
     formateaFormulario
@@ -608,27 +630,27 @@ Private Sub UserForm_Activate()
 
     
     If (EDIT_MODE) Then
-        GLOBAL_COUNTRY = Athena_Token_get_Country(Me.token)
-        GLOBAL_COUNTRY_COD = Athena_Token_get_CountryCod(Me.token)
+        'GLOBAL_COUNTRY = Athena_Token_get_Country(Me.token)
+        'GLOBAL_COUNTRY_COD = Athena_Token_get_CountryCod(Me.token)
         
-        ' Read Token Unit
-        If Athena_Token_get_Matrix_Units(Me.token) <> "" Then
-            MultiUnitCheckBox.value = Athena_Token_get_AreaDeptCategoriaCod(Me.token) = "-1"
-            If notFirst_Iteration Then
-                ' READ FROM TOKEN
-                Dim item As Variant
-                Dim i As Integer
-                item = VBA.Split(Athena_Token_get_Matrix_Units(Me.token), SEP_TOKEN)
-                For i = 0 To VariantSize(item) - 1
-                    PaisListBoxSel.AddItem item(i)
-                Next
-            End If
-        End If
+        '' Read Token Unit
+        'If Athena_Token_get_Matrix_Units(Me.token) <> "" Then
+            'MultiUnitCheckBox.value = Athena_Token_get_AreaDeptCategoriaCod(Me.token) = "-1"
+            'If notFirst_Iteration Then
+                '' READ FROM TOKEN
+                'Dim item As Variant
+                'Dim i As Integer
+                'item = VBA.Split(Athena_Token_get_Matrix_Units(Me.token), SEP_TOKEN)
+                'For i = 0 To VariantSize(item) - 1
+                    'PaisListBoxSel.AddItem item(i)
+                'Next
+            'End If
+        'End If
         
         ' Initial Load of Already selected units
         'CategoriaListBox_Click
         ' If not Unit = CROSS Then just One element
-        If PaisListBox <> UNIT_CROSS And Not MultiUnitCheckBox And PaisListBoxSel.ListCount = 0 Then PaisListBoxSel.AddItem PaisListBox
+        'If PaisListBox <> UNIT_CROSS And Not MultiUnitCheckBox And PaisListBoxSel.ListCount = 0 Then PaisListBoxSel.AddItem PaisListBox
         Load_Categories
     
         ComentarioTextBox = Athena_Token_get_Comments(token)
@@ -820,7 +842,7 @@ End Sub
 
 Private Sub SistemaComboBox_Change()
     If ATHENA_GLOBAL_CONTROL <> ATHENA_CONTROL_CANCEL Then
-        PaisFrame.Visible = True
+        'PaisFrame.Visible = True
         Load_Units
         recalculaAltoVentana
     End If
@@ -839,8 +861,8 @@ End Sub
 
 Private Sub Load_Sistems()
     SistemaComboBox.Clear
-    PaisListBox.Clear
-    PaisListBoxSel.Clear
+    'PaisListBox.Clear
+    'PaisListBoxSel.Clear
     CategoriaListBox.Clear
     
     athena_area_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_AREA_DEPT(GLOBAL_MAILBOX), verbose)
@@ -867,59 +889,59 @@ Private Sub Load_Sistems()
 End Sub
 
 Private Sub Load_Units()
-    PaisListBox.Clear
-    PaisListBoxSel.Clear
+    'PaisListBox.Clear
+    'PaisListBoxSel.Clear
     CategoriaListBox.Clear
     
     'Recuperar paises
-    Dim query As String: query = ATHENA_GET_QUERY_GET_COUNTRY(SistemaComboBox.value)
-    athena_country_list() = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    'Dim query As String: query = ATHENA_GET_QUERY_GET_COUNTRY(SistemaComboBox.value)
+    'athena_country_list() = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
     
-    Dim item As Variant
-    If IsEmpty(athena_country_list(0)) Then
-        PaisListBox.AddItem info_not_found_err
-    Else
-        Dim tokenCountry As String: tokenCountry = Athena_Token_get_Country(token)
-        Dim unitsMulti As String: unitsMulti = Athena_Token_get_Matrix_Units(token)
-        Dim pos As Integer: pos = 0
-        For Each item In athena_country_list
-            ' Discard CROSS (allways)
-            If Not (MultiUnitCheckBox And item(0) = UNIT_CROSS) Then
-                ' Discard Already Assigned (EDIT + FIRST)
-                If Not notFirst_Iteration Or Len(Replace(unitsMulti, item(0), "")) = Len(unitsMulti) Then
-                PaisListBox.AddItem item(0)
-                If item(0) = tokenCountry Then PaisListBox.ListIndex = pos
-                pos = pos + 1
-                End If
-            End If
+    'Dim item As Variant
+    'If IsEmpty(athena_country_list(0)) Then
+        'PaisListBox.AddItem info_not_found_err
+    'Else
+        'Dim tokenCountry As String: tokenCountry = Athena_Token_get_Country(token)
+        'Dim unitsMulti As String: unitsMulti = Athena_Token_get_Matrix_Units(token)
+        'Dim pos As Integer: pos = 0
+        'For Each item In athena_country_list
+            '' Discard CROSS (allways)
+            'If Not (MultiUnitCheckBox And item(0) = UNIT_CROSS) Then
+                '' Discard Already Assigned (EDIT + FIRST)
+                'If Not notFirst_Iteration Or Len(Replace(unitsMulti, item(0), "")) = Len(unitsMulti) Then
+                'PaisListBox.AddItem item(0)
+                'If item(0) = tokenCountry Then PaisListBox.ListIndex = pos
+                'pos = pos + 1
+                'End If
+            'End If
             
-        Next item
+        'Next item
         
-        'Si solo hay un pais (y no estamos en edicion), recuperamos las categorias
-        If PaisListBox.ListCount = 1 And Not EDIT_MODE Then
-            PaisListBox.ListIndex = 0
-            GLOBAL_COUNTRY = PaisListBox.List(PaisListBox.ListIndex)
-            GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBox.List(PaisListBox.ListIndex))
+        ''Si solo hay un pais (y no estamos en edicion), recuperamos las categorias
+        'If PaisListBox.ListCount = 1 And Not EDIT_MODE Then
+            'PaisListBox.ListIndex = 0
+            'GLOBAL_COUNTRY = PaisListBox.List(PaisListBox.ListIndex)
+            'GLOBAL_COUNTRY_COD = get_cod_by_desc(athena_country_list, PaisListBox.List(PaisListBox.ListIndex))
             
             '' Comentado ya que genera doble unidad
             ''PaisListBoxSel.AddItem PaisListBox.List(PaisListBox.ListIndex)
             ''Load_Categories
-        End If
-    End If
+        'End If
+    'End If
     
     'Hay más paises. Ocultamos Categoria hasta que se escogja pais
-    If PaisListBoxSel.ListCount <= 0 Then
-        CategoriaFrame.Visible = EDIT_MODE
-        ClassFrame.Visible = EDIT_MODE
+    'If PaisListBoxSel.ListCount <= 0 Then
+        'CategoriaFrame.Visible = EDIT_MODE
+        'ClassFrame.Visible = EDIT_MODE
         
-        ChecksFrame.Visible = False
+        ChecksFrame.Visible = True
         NotesFrame.Visible = True
         
         ReassignCheckBox.value = False
         AjusteTiempoCheckBox.value = False
         
         NoInitCheckBox.value = False
-    End If
+    'End If
     
     recalculaAltoVentana
 End Sub
@@ -1105,8 +1127,8 @@ Private Sub formateaFormulario()
 '    SistemaFrame.Left = SistemaFrame_Left
 '    SistemaFrame.Width = SistemaFrame_Width
 '
-    PaisFrame.Visible = False
-    PaisFrame.BorderStyle = debugBorderStyle
+    'PaisFrame.Visible = False
+    'PaisFrame.BorderStyle = debugBorderStyle
 '    PaisFrame.Top = PaisFrame_Top
 '    PaisFrame.Height = PaisFrame_Height
 '    PaisFrame.Left = PaisFrame_Left
@@ -1176,7 +1198,7 @@ Private Sub recalculaAltoVentana()
     Dim altura As Integer: altura = Window_Height
     
     altura = TareaFrame.Height + SistemaFrame.Height + ButtonFrame.Height
-    If PaisFrame.Visible Then altura = TareaFrame.Height + SistemaFrame.Height + PaisFrame.Height + ButtonFrame.Height
+    'If PaisFrame.Visible Then altura = TareaFrame.Height + SistemaFrame.Height + PaisFrame.Height + ButtonFrame.Height
     If CategoriaFrame.Visible Then altura = TareaFrame.Height + CategoriaFrame.Height + ButtonFrame.Height
     If ChecksFrame.Visible Then ' Check And Notes Visible at the same time
         altura = altura + ChecksFrame.Height
