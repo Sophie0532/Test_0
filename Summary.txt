@@ -1,17 +1,12 @@
-    Dim query As String
-    CategoriaListBox.Clear
-
-    ' Consulta para obtener todas las categorías sin importar área/unidad
-    query = "SELECT TRIM(CAT_1) || ' # ' || TRIM(CAT_2) || ' # ' || TRIM(CAT_3) AS CAT FROM CATEGORY_DUTY ORDER BY CAT;"
-
-    ' Ejecuta la consulta
-    athena_category_list = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
-
-    ' Verifica si hay resultados
-    If IsEmpty(athena_category_list(0)) Then
-        CategoriaListBox.AddItem "No hay categorías"
-    Else
-        For Each item In athena_category_list
-            CategoriaListBox.AddItem item(0)
-        Next item
+Private Sub CategoriaListBox_Click()
+    If CategoriaListBox.ListIndex > -1 Then
+        ' Guarda el texto visible como nombre de la categoría
+        GLOBAL_CATEGORY = CategoriaListBox.Value
+        
+        ' Guarda el código de categoría, si viene desde la consulta
+        ' Supone que athena_category_list tiene la forma: (CAT_COD, CAT)
+        If Not IsEmpty(athena_category_list) Then
+            GLOBAL_CATEGORY_COD = athena_category_list(CategoriaListBox.ListIndex)(0)
+        End If
     End If
+End Sub
