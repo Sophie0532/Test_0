@@ -1,21 +1,27 @@
 Private Sub Load_Canal()
+    On Error GoTo ErrHandle
+
     CanalComboBox.Clear
 
     Dim canalList As Variant
     canalList = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_CANAL(), verbose)
 
     If IsEmpty(canalList(0)) Then
-        CanalComboBox.AddItem "Sin datos disponibles"
+        CanalComboBox.AddItem info_not_found_err
     Else
         Dim item As Variant
         For Each item In canalList
-            CanalComboBox.AddItem item(0) ' Si quisieras trabajar con .BoundColumn, puedes también almacenar CANAL_COD
+            CanalComboBox.AddItem item(0) ' item(0) = CANAL_NAME
         Next item
     End If
 
     If GLOBAL_CANAL <> "" Then
         CanalComboBox.value = GLOBAL_CANAL
-    Else
+    ElseIf CanalComboBox.ListCount > 0 Then
         CanalComboBox.ListIndex = 0
     End If
+
+    Exit Sub
+ErrHandle:
+    MsgBox "Error al cargar CanalComboBox: " & Err.Description, vbCritical
 End Sub
