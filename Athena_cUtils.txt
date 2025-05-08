@@ -1,3 +1,4 @@
+Option Explicit
 
 ''''''''''''''''''''''''''
 ''' PORTAPAPELES
@@ -268,6 +269,11 @@ Public Sub Athena_Mail_set_conversation(ByRef token As Outlook.mailItem, Convers
         token.PropertyAccessor.SetProperty PR_CONVERSATION_INDEX, ConversationIndex
         token.Save
     'End If
+End Sub
+Public Sub Athena_Mail_set_canal(ByRef token As Outlook.mailItem, canal As String)
+    If canal <> "" Then token.UserProperties.Add Athena_Column_canal, olText, True
+    token.UserProperties(Athena_Column_canal).value = canal
+    token.Save
 End Sub
 
 ' set up icon
