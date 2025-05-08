@@ -1,1856 +1,1108 @@
-
 Option Explicit
 
+
 Public GLOBAL_CLIENT As String
-Public GLOBAL_SN As String
-
-
-
-'Método que establece los valores iniciales de los elementos del token y lo mueve a la bandeja de entrada
-Public Function Athena_Token_Init(mailItem As Outlook.mailItem, campos() As String, Optional status_init As String = Athena_Mail_Status_NoClassify, Optional idDuty As String = "-1") As Outlook.mailItem
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    Dim inboxFolder As Outlook.Folder: Set inboxFolder = Get_Inbox_Folder(Outlook.Application.ActiveExplorer.currentFolder)
-    Dim token As Outlook.mailItem
-    ' Create Mail (Token)
-    If mailItem Is Nothing Then
-        ' mailItem (Empty) ==> Manual (Classifying / Planned)
-        Set token = Outlook.Application.CreateItem(olMailItem).Move(inboxFolder)
-        token.BodyFormat = olFormatRichText
-        token.body = ""
-    Else
-        ' mailItem* ==> Reply
-        Set token = mailItem.Reply.Move(inboxFolder)
-        token.Subject = mailItem.Subject
-        token.BodyFormat = olFormatRichText
-        token.body = ""
-    End If
-    
-    ' Set it up
-    Athena_Token_Update_Mail mailItem, token, campos, status_init, idDuty
-    
-    Set inboxFolder = Nothing
-    Set Athena_Token_Init = token
-End Function
-
-' Returns Parsed emailbody as JSON structure (Dictionary)
-' String (json) -> Dictionary
-Public Function Athena_Token_Read_JSON(tokenStr As String) As Object ' Dictionary
-    Set Athena_Token_Read_JSON = Athena_cJSON.ParseJson(tokenStr)
-End Function
-
-'Establece Icono de Status dado un token y un estado.
-Private Sub Athena_Token_Update_Icon(ByRef token As Outlook.mailItem, status As Integer)
-    Select Case status    ' Evaluate Number.
-        Case Athena_Mail_StatusCod_NoClassify    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_NoClassify
-        Case Athena_Mail_StatusCod_Started    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_Started
-        Case Athena_Mail_StatusCod_Stopped    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_Stopped
-        Case Athena_Mail_StatusCod_NoStart    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_NoStart
-        Case Athena_Mail_StatusCod_End    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_End
-        Case Athena_Mail_StatusCod_UnAssigned    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_UnAssigned
-        Case Athena_Mail_StatusCod_Discarted    ' Number between 1 and 5, inclusive.
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", Athena_Mail_StatusIcon_Discarted
-        Case Else
-            token.PropertyAccessor.SetProperty "http://schemas.microsoft.com/mapi/proptag/0x10800003", 428
-    End Select
-End Sub
-
-'Actualiza token (atributos y body)
-Public Sub Athena_Token_Update_Mail(mailItem As Outlook.mailItem, ByRef token As Outlook.mailItem, campos() As String, duty_status As String, idDuty As String)
-On Error GoTo ErrHndlr
-    ' Set Mail_Icon
-    Athena_Token_Update_Icon token, getStatusCod(duty_status)
-    
-    ' Set Token Body
-    Athena_Token_set_body token, campos, duty_status, idDuty
-        
-    ' Set Mail Fields (To / CC / BCC ..)
-    If VariantSize(campos) > 0 Then
-        Athena_Mail_set_Owner token, "" & campos(CAMPO_USER), "" & campos(CAMPO_USER_COD)
-        Athena_Mail_set_IdDuty token, idDuty
-        If token.Subject <> campos(CAMPO_TITLE_FULL) Then Athena_Mail_set_desc token, "" & token.Subject
-        Athena_Mail_set_title token, campos(CAMPO_TITLE_FULL)
-        Athena_Mail_set_status token, duty_status
-        Athena_Mail_set_priority token, campos(CAMPO_PRIORITY)
-        Athena_Mail_set_canal token, "" & campos(CAMPO_CANAL)
-        'Athena_Mail_set_client token, campos(CAMPO_CLIENT)
-
-    Else
-        Athena_Mail_set_Owner token, Athena_Mail_Owner_UnAssigned, Athena_Mail_OwnerCod_UnAssigned
-        Athena_Mail_set_IdDuty token, idDuty
-        If token.Subject = "" Then Athena_Mail_set_title token, Athena_Mail_Desc_Manual & " " & Format(Now, Athena_FullTime_Pattern)
-        Athena_Mail_set_status token, duty_status
-    End If
-    
-    ' Set Mail Custom Columns
-    Athena_Token_set_custom_columns token, campos
-    
-ErrHndlr:
-    If Err Then Traza lgFATAL, Err.Number & " " & Err.Description, "Athena_Token_Update_Mail"
-    token.Save
-    token.Close (olSave)
-    
-    ' If Subject changes from original mail, merge it back to main conversation
-    If Not mailItem Is Nothing Then Athena_Mail_set_conversation token, mailItem.ConversationTopic, mailItem.PropertyAccessor.GetProperty(PR_CONVERSATION_INDEX)
-End Sub
-
-' Returns Updated JSON once a pre-token is classified
-Private Sub Athena_Token_Update_JSON(ByRef token As Outlook.mailItem, ByRef jsonDict As Dictionary, campos() As String, duty_status As String, idDuty As String)
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    Athena_Token_check_first_json jsonDict, "" & idDuty, "" & campos(CAMPO_TITLE_FULL), "" & token.Subject
-    Athena_Token_check_category_json jsonDict, "" & campos(CAMPO_CATEGORY_COD), "" & campos(CAMPO_CATEGORY), "" & campos(CAMPO_AREA), "" & campos(CAMPO_AREA_COD), "" & campos(CAMPO_COUNTRY), "" & campos(CAMPO_COUNTRY_COD), "" & campos(CAMPO_MATRIX_UNITS)
-    Athena_Token_check_priority_json jsonDict, "" & campos(CAMPO_PRIORITY), "" & campos(CAMPO_PRIORITY_COD)
-    'Athena_Token_check_client_json jsonDict, "" & campos(CAMPO_CLIENT), "" & campos(CAMPO_CLIENT_COD)
-    Athena_Token_check_owner_json jsonDict, "" & campos(CAMPO_USER_EMPLOYEE), "" & campos(CAMPO_USER_COD)
-    Athena_Token_check_volumen_json jsonDict, "" & campos(CAMPO_NUM_ACTIONS)
-    Athena_Token_check_origin_json jsonDict, "" & campos(CAMPO_ORIGIN), "" & campos(CAMPO_ORIGIN_COD)
-    Athena_Token_check_notes_json jsonDict, "" & campos(CAMPO_COMMENT)
-    Athena_Token_check_canal_json jsonDict, "" & campos(CAMPO_CANAL)
-    
-    'Check Status
-    If CBool(campos(CAMPO_TIME_ADJUST)) Then
-        Athena_Token_check_status_json jsonDict, token.CC, Athena_Mail_Status_Started, True, "" & campos(CAMPO_TIME_START)
-        Athena_Token_check_status_json jsonDict, token.CC, duty_status, True, "" & campos(CAMPO_TIME_END)
-    ElseIf (CBool(campos(CAMPO_POSTPONED)) Or CBool(campos(CAMPO_REASSIGNED))) And duty_status <> Athena_Mail_Status_UnAssigned Then
-        Athena_Token_check_status_json jsonDict, token.CC, Athena_Mail_Status_Started, False, "" & Format(DateAdd("s", -1, t), Athena_FullTime_Pattern)
-        Athena_Token_check_status_json jsonDict, token.CC, duty_status, False, t
-    Else
-        Athena_Token_check_status_json jsonDict, token.CC, duty_status, False, t
-    End If
-    
-    Athena_Token_check_tags jsonDict, "" & campos(CAMPO_PK), "" & campos(CAMPO_TAG)
-    Athena_Token_check_times_json jsonDict, Format(token.CreationTime, Athena_FullTime_Pattern), "" & campos(CAMPO_MAIL_STAMP), t
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & campos(CAMPO_AREA_COD), getPath(token)
-    
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-End Sub
-
-Sub Athena_Token_edit_json(ByRef token As Outlook.mailItem, campos() As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    ' Json Fields >> Call Update_Mail???
-    Athena_Token_check_first_json jsonDict, "", token.Subject, "" & campos(CAMPO_COMMENT)
-    Athena_Token_check_category_json jsonDict, "" & campos(CAMPO_CATEGORY_COD), "" & campos(CAMPO_CATEGORY), "" & campos(CAMPO_AREA), "" & campos(CAMPO_AREA_COD), "" & campos(CAMPO_COUNTRY), "" & campos(CAMPO_COUNTRY_COD), "" & campos(CAMPO_MATRIX_UNITS)
-    Athena_Token_check_priority_json jsonDict, "" & campos(CAMPO_PRIORITY), "" & campos(CAMPO_PRIORITY_COD)
-   ' Athena_Token_check_client_json jsonDict, "" & campos(CAMPO_CLIENT), "" & campos(CAMPO_CLIENT_COD)
-    Athena_Token_check_volumen_json jsonDict, "" & campos(CAMPO_NUM_ACTIONS)
-    Athena_Token_check_notes_json jsonDict, "" & campos(CAMPO_COMMENT)
-    Athena_Token_check_canal_json jsonDict, "" & campos(CAMPO_CANAL)
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-    
-    ' Mail Fields
-    Athena_Mail_set_priority token, "" & campos(CAMPO_PRIORITY)
-    'Athena_Mail_set_client token, "" & campos(CAMPO_CLIENT)
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    ' Set Mail Custom Columns
-    Athena_Token_set_custom_columns token, campos
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    Athena_Mail_set_canal token, "" & campos(CAMPO_CANAL)
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-Private Function getEmptyEvents() As Variant
-    Dim newEvents As Variant
-    ReDim newEvents(0 To 0) As Variant
-    getEmptyEvents = newEvents
-End Function
-
-Private Sub Athena_Token_init_json(ByRef jsonDict As Dictionary)
-    Athena_Token_init_first_json jsonDict
-    Athena_Token_init_category_json jsonDict
-    Athena_Token_init_notes_json jsonDict
-    Athena_Token_init_status_json jsonDict
-    Athena_Token_init_owner_json jsonDict
-    Athena_Token_init_priority_json jsonDict
-    Athena_Token_init_client_json jsonDict
-    Athena_Token_init_volumen_json jsonDict
-    Athena_Token_init_origin_json jsonDict
-    Athena_Token_init_ticket_json jsonDict
-    Athena_Token_init_incident_json jsonDict
-    Athena_Token_init_trace_json jsonDict
-    Athena_Token_init_marks_json jsonDict
-    Athena_Token_init_times_json jsonDict
-End Sub
-
-Private Sub Athena_Token_init_incident_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_INCIDENT_OP) Then jsonDict.Add TOKEN_INCIDENT_OP, ""
-    If Not jsonDict.Exists(TOKEN_VOLUMEN_ERROR) Then jsonDict.Add TOKEN_VOLUMEN_ERROR, ""
-    If Not jsonDict.Exists(TOKEN_COMUNICA) Then jsonDict.Add TOKEN_COMUNICA, ""
-End Sub
-
-Private Sub Athena_Token_init_ticket_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_EVENTS_TICKET) Then jsonDict.Add TOKEN_EVENTS_TICKET, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_category_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_AREA) Then jsonDict.Add TOKEN_AREA, ""
-    If Not jsonDict.Exists(TOKEN_UNIT) Then jsonDict.Add TOKEN_UNIT, ""
-    If Not jsonDict.Exists(TOKEN_CAT) Then jsonDict.Add TOKEN_CAT, ""
-    If Not jsonDict.Exists(TOKEN_AREA_COD) Then jsonDict.Add TOKEN_AREA_COD, ""
-    If Not jsonDict.Exists(TOKEN_UNIT_COD) Then jsonDict.Add TOKEN_UNIT_COD, ""
-    If Not jsonDict.Exists(TOKEN_CAT_COD) Then jsonDict.Add TOKEN_CAT_COD, ""
-    If Not jsonDict.Exists(TOKEN_EVENTS_CAT) Then jsonDict.Add TOKEN_EVENTS_CAT, getEmptyEvents
-    If Not jsonDict.Exists(TOKEN_MATRIX_UNITS) Then jsonDict.Add TOKEN_MATRIX_UNITS, ""
-    If Not jsonDict.Exists(TOKEN_MATRIX_CAT_PRCT) Then jsonDict.Add TOKEN_MATRIX_CAT_PRCT, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_volumen_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_VOLUMEN) Then jsonDict.Add TOKEN_VOLUMEN, ""
-    If Not jsonDict.Exists(TOKEN_EVENTS_VOLUMEN) Then jsonDict.Add TOKEN_EVENTS_VOLUMEN, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_priority_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_PRIORITY) Then jsonDict.Add TOKEN_PRIORITY, Athena_Mail_Priority_Cliente
-    If Not jsonDict.Exists(TOKEN_PRIORITY_COD) Then jsonDict.Add TOKEN_PRIORITY_COD, Athena_Mail_PriorityCod_Normal
-    If Not jsonDict.Exists(TOKEN_EVENTS_PRIORITY) Then jsonDict.Add TOKEN_EVENTS_PRIORITY, Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(getEmptyEvents, Athena_Mail_Priority_Cliente, False, Athena_Mail_PriorityCod_Normal))
-End Sub
-
-Private Sub Athena_Token_init_client_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_CLIENT) Then jsonDict.Add TOKEN_CLIENT, ""
-    
-End Sub
-Private Sub Athena_Token_init_canal_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_CANAL) Then jsonDict.Add TOKEN_CANAL, ""
-    
-End Sub
-Private Sub Athena_Token_init_owner_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_OWNER) Then jsonDict.Add TOKEN_OWNER, getUserLogin
-    If Not jsonDict.Exists(TOKEN_OWNER_COD) Then jsonDict.Add TOKEN_OWNER_COD, getUserCod(jsonDict(TOKEN_OWNER))
-    If Not jsonDict.Exists(TOKEN_EVENTS_OWNER) Then jsonDict.Add TOKEN_EVENTS_OWNER, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_status_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_STATUS) Then jsonDict.Add TOKEN_STATUS, getEmptyEvents
-    If Not jsonDict.Exists(TOKEN_STATUS_COD) Then jsonDict.Add TOKEN_STATUS_COD, ""
-    If Not jsonDict.Exists(TOKEN_EVENTS_STATUS) Then jsonDict.Add TOKEN_EVENTS_STATUS, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_notes_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_NOTES) Then jsonDict.Add TOKEN_NOTES, ""
-End Sub
-
-
-Private Sub Athena_Token_init_times_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_LAST_UPDATE_STAMP) Then jsonDict.Add TOKEN_LAST_UPDATE_STAMP, ""
-    If Not jsonDict.Exists(TOKEN_TOKEN_STAMP) Then jsonDict.Add TOKEN_TOKEN_STAMP, ""
-    If Not jsonDict.Exists(TOKEN_MAIL_STAMP) Then jsonDict.Add TOKEN_MAIL_STAMP, ""
-    If Not jsonDict.Exists(TOKEN_DUTY_STAMP) Then jsonDict.Add TOKEN_DUTY_STAMP, ""
-End Sub
-
-Private Sub Athena_Token_init_marks_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_PK) Then jsonDict.Add TOKEN_PK, ""
-    If Not jsonDict.Exists(TOKEN_TAG) Then jsonDict.Add TOKEN_TAG, getEmptyEvents
-    If Not jsonDict.Exists(TOKEN_INDEX) Then jsonDict.Add TOKEN_INDEX, getEmptyEvents
-End Sub
-
-Private Sub Athena_Token_init_first_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_TASK_ID) Then jsonDict.Add TOKEN_TASK_ID, -1
-    If Not jsonDict.Exists(TOKEN_TITLE) Then jsonDict.Add TOKEN_TITLE, ""
-    If Not jsonDict.Exists(TOKEN_COMMENT) Then jsonDict.Add TOKEN_COMMENT, ""
-End Sub
-
-Private Sub Athena_Token_init_origin_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_ORIGIN) Then jsonDict.Add TOKEN_ORIGIN, ""
-    If Not jsonDict.Exists(TOKEN_ORIGIN_COD) Then jsonDict.Add TOKEN_ORIGIN_COD, ""
-End Sub
-
-Private Sub Athena_Token_init_trace_json(ByRef jsonDict As Dictionary)
-    If Not jsonDict.Exists(TOKEN_CONVERSATION_ID) Then jsonDict.Add TOKEN_CONVERSATION_ID, ""
-    If Not jsonDict.Exists(TOKEN_ENTRY_ID) Then jsonDict.Add TOKEN_ENTRY_ID, ""
-    If Not jsonDict.Exists(TOKEN_DB_FILE) Then jsonDict.Add TOKEN_DB_FILE, ""
-    If Not jsonDict.Exists(TOKEN_MAILBOX) Then jsonDict.Add TOKEN_MAILBOX, ""
-    If Not jsonDict.Exists(TOKEN_PATH) Then jsonDict.Add TOKEN_PATH, ""
-    If Not jsonDict.Exists(TOKEN_SYNCHRO) Then jsonDict.Add TOKEN_SYNCHRO, "N"
-End Sub
-
-Private Sub Athena_Token_check_first_json(ByRef jsonDict As Dictionary, taskid As String, title As String, comment As String)
-    Athena_Token_init_first_json jsonDict
-
-    If jsonDict(TOKEN_TASK_ID) <> taskid And taskid <> "" Then jsonDict(TOKEN_TASK_ID) = taskid
-    
-    If jsonDict(TOKEN_TITLE) <> title And title <> "" Then jsonDict(TOKEN_TITLE) = clearString(title)
-    If jsonDict(TOKEN_COMMENT) <> Trim(comment) And Trim(comment) <> "" And title <> comment Then jsonDict(TOKEN_COMMENT) = clearString(comment)
-End Sub
-
-Private Sub Athena_Token_check_category_json(ByRef jsonDict As Dictionary, area_dept_cat_cod As String, category As String, area As String, area_cod As String, unit As String, unit_cod As String, matrix_unit As String)
-    Athena_Token_init_category_json jsonDict
-    If jsonDict(TOKEN_CAT_COD) <> area_dept_cat_cod And area_dept_cat_cod <> "" Then
-        If jsonDict(TOKEN_CAT) <> category And category <> "" Then jsonDict(TOKEN_CAT) = category
-        If jsonDict(TOKEN_CAT_COD) <> area_dept_cat_cod And area_dept_cat_cod <> "" Then jsonDict(TOKEN_CAT_COD) = area_dept_cat_cod
-        If jsonDict(TOKEN_AREA) <> area And area <> "" Then jsonDict(TOKEN_AREA) = area
-        If jsonDict(TOKEN_AREA_COD) <> area_cod And area_cod <> "" Then jsonDict(TOKEN_AREA_COD) = area_cod
-        If jsonDict(TOKEN_UNIT) <> unit And unit <> "" Then jsonDict(TOKEN_UNIT) = unit
-        If jsonDict(TOKEN_UNIT_COD) <> unit_cod And unit_cod <> "" Then jsonDict(TOKEN_UNIT_COD) = unit_cod
-        
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_CAT))
-        jsonDict(TOKEN_EVENTS_CAT) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, area_dept_cat_cod, False, ""))
-    End If
-    ' 1º matriz CAT / Unit
-    Athena_Token_check_matrix_json jsonDict, matrix_unit
-    ' 2º List Multi Unit
-    If jsonDict(TOKEN_UNIT) = UNIT_CROSS And jsonDict(TOKEN_MATRIX_UNITS) <> matrix_unit And matrix_unit <> "" Then jsonDict(TOKEN_MATRIX_UNITS) = matrix_unit
-    If jsonDict(TOKEN_UNIT) <> UNIT_CROSS Then jsonDict(TOKEN_MATRIX_UNITS) = matrix_unit
-End Sub
-
-Private Sub Athena_Token_set_category_matrix_json(ByRef jsonDict As Dictionary, units As Variant)
-    Athena_Token_init_category_json jsonDict
-    'If jsonDict(TOKEN_CAT_COD) <> area_dept_cat_cod And area_dept_cat_cod <> "" Then
-    'End If
-End Sub
-
-Private Sub Athena_Token_check_volumen_json(ByRef jsonDict As Dictionary, volumen As String)
-    Athena_Token_init_volumen_json jsonDict
-    If jsonDict(TOKEN_VOLUMEN) <> volumen And volumen <> "" And esNumeroAccionesValido(volumen) Then
-        jsonDict(TOKEN_VOLUMEN) = volumen
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_VOLUMEN))
-        jsonDict(TOKEN_EVENTS_VOLUMEN) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, volumen, False, ""))
-    End If
-End Sub
-
-Private Sub Athena_Token_check_matrix_units_json(ByRef jsonDict As Dictionary, area_dept_cat_cod As String)
-    Athena_Token_init_category_json jsonDict
-    ' Read Units
-    Dim matrix_units As String
-    Dim result As Variant: result = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(area_dept_cat_cod), verbose)
-    ' Multi_Unit
-    If VariantSize(result) > 0 Then
-        Dim i As Integer
-        For i = 0 To VariantSize(result) - 1
-            matrix_units = matrix_units & result(i)(0) & SEP_TOKEN
-        Next
-        matrix_units = Left(matrix_units, Len(matrix_units) - 1)
-    End If
-    jsonDict(TOKEN_MATRIX_CAT_PRCT) = matrix_units
-End Sub
-
-Private Sub Athena_Token_check_matrix_json(ByRef jsonDict As Dictionary, matrix_units As String)
-    Athena_Token_init_category_json jsonDict
-    Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_MATRIX_CAT_PRCT))
-    
-    'If (matrix_units  <> "" And VariantSize(newEvents) = 0) Then
-    Dim Sql As String
-    If jsonDict(TOKEN_CAT_COD) <> "-1" Then
-        Sql = ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(jsonDict(TOKEN_CAT_COD), True)
-    Else
-        Sql = ATHENA_GET_QUERY_GET_CATEGORIES_FROM_UNITS_CATEGORY("" & jsonDict(TOKEN_AREA_COD), matrix_units, jsonDict(TOKEN_CAT))
-    End If
-    newEvents = DB_DQL(DDBB_Athena_file_path & DDBB_Athena_file, Sql, verbose)
-    If VariantSize(newEvents(0)) = 0 Or matrix_units = "" Then
-        jsonDict(TOKEN_MATRIX_CAT_PRCT) = getEmptyEvents
-    Else
-        jsonDict(TOKEN_MATRIX_CAT_PRCT) = Athena_Token_Convert_Events_JSON(newEvents)
-    End If
-    'End If
-    
-End Sub
-
-Private Sub Athena_Token_check_origin_json(ByRef jsonDict As Dictionary, origin As String, origin_cod As String)
-    Athena_Token_init_origin_json jsonDict
-    If jsonDict(TOKEN_ORIGIN) <> origin And origin <> "" Then jsonDict(TOKEN_ORIGIN) = origin
-    If jsonDict(TOKEN_ORIGIN_COD) <> origin_cod And origin_cod <> "" Then jsonDict(TOKEN_ORIGIN_COD) = origin_cod
-End Sub
-
-Private Sub Athena_Token_check_priority_json(ByRef jsonDict As Dictionary, priority As String, priority_cod As String)
-    Athena_Token_init_priority_json jsonDict
-    If jsonDict(TOKEN_PRIORITY) <> priority Then
-        jsonDict(TOKEN_PRIORITY) = priority
-        jsonDict(TOKEN_PRIORITY_COD) = priority_cod
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_PRIORITY))
-        jsonDict(TOKEN_EVENTS_PRIORITY) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, priority, False, priority_cod))
-    End If
-End Sub
-
-Private Sub Athena_Token_check_owner_json(ByRef jsonDict As Dictionary, owner As String, owner_cod As String)
-    Athena_Token_init_owner_json jsonDict
-    If owner_cod <> -1 And (jsonDict(TOKEN_OWNER) <> owner Or VariantDictSize(jsonDict(TOKEN_EVENTS_OWNER)) = 0) Then
-        jsonDict(TOKEN_OWNER) = owner
-        jsonDict(TOKEN_OWNER_COD) = owner_cod
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_OWNER))
-        jsonDict(TOKEN_EVENTS_OWNER) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, owner, False, owner_cod))
-    End If
-End Sub
-
-Private Sub Athena_Token_check_status_json(ByRef jsonDict As Dictionary, status_prev As String, status As String, isAdj As Boolean, t_stamp As String)
-    Athena_Token_init_status_json jsonDict
-    If status_prev <> status Then
-        jsonDict(TOKEN_STATUS) = Split(status, ";")
-        jsonDict(TOKEN_STATUS_COD) = getStatusCod(status)
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_STATUS))
-        jsonDict(TOKEN_EVENTS_STATUS) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, status, isAdj, t_stamp))
-    End If
-End Sub
-
-Private Sub Athena_Token_check_notes_json(ByRef jsonDict As Dictionary, notes As String)
-    Athena_Token_init_notes_json jsonDict
-    Dim msg As String: msg = Left(Trim(clearString(notes)), 250)
-    If msg <> "" Then
-        Dim newEvents As Variant: newEvents = Athena_Token_read_Events_JSON(jsonDict(TOKEN_NOTES))
-        jsonDict(TOKEN_NOTES) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(newEvents, msg, False, ""))
-    End If
-End Sub
-
-Private Sub Athena_Token_check_times_json(ByRef jsonDict As Dictionary, token_stamp As String, mail_stamp As String, duty_stamp)
-    Athena_Token_init_times_json jsonDict
-    
-    If jsonDict(TOKEN_TOKEN_STAMP) = "" And token_stamp <> "" Then jsonDict(TOKEN_TOKEN_STAMP) = token_stamp
-    If jsonDict(TOKEN_MAIL_STAMP) = "" And mail_stamp <> "" Then jsonDict(TOKEN_MAIL_STAMP) = mail_stamp
-    If jsonDict(TOKEN_DUTY_STAMP) = "" And duty_stamp <> "" Then jsonDict(TOKEN_DUTY_STAMP) = duty_stamp
-End Sub
-
-Private Sub Athena_Token_check_trace_json(ByRef jsonDict As Dictionary, token As Outlook.mailItem)
-    Athena_Token_init_trace_json jsonDict
-    
-    If jsonDict(TOKEN_CONVERSATION_ID) <> token.ConversationID Then jsonDict(TOKEN_CONVERSATION_ID) = token.ConversationID
-    If jsonDict(TOKEN_ENTRY_ID) <> token.EntryId Then jsonDict(TOKEN_ENTRY_ID) = token.EntryId
-    
-    If jsonDict(TOKEN_CONVERSATION_ID) = "" Then jsonDict(TOKEN_CONVERSATION_ID) = jsonDict(TOKEN_TASK_ID)
-    If jsonDict(TOKEN_ENTRY_ID) = "" Then jsonDict(TOKEN_ENTRY_ID) = jsonDict(TOKEN_TASK_ID)
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-End Sub
-
-Private Sub Athena_Token_check_db_json(ByRef jsonDict As Dictionary, mailbox As String, area_dept_cat_cod As String, path As String)
-    Dim setDb As Boolean
-    Athena_Token_init_trace_json jsonDict
-    
-    If jsonDict(TOKEN_MAILBOX) = "" And mailbox <> "" Then jsonDict(TOKEN_MAILBOX) = mailbox
-    If jsonDict(TOKEN_PATH) = "" And path <> "" Then jsonDict(TOKEN_PATH) = path
-    If (jsonDict(TOKEN_DB_FILE) = "" Or jsonDict(TOKEN_DB_FILE) = "ATHENA_NET_DATA.db") And jsonDict(TOKEN_MAILBOX) <> "" And jsonDict(TOKEN_AREA_COD) <> "" Then jsonDict(TOKEN_DB_FILE) = DDBB_Athena_file_data_dept(jsonDict(TOKEN_MAILBOX), jsonDict(TOKEN_AREA_COD))
-    If jsonDict(TOKEN_SYNCHRO) = "" Then jsonDict(TOKEN_SYNCHRO) = "N"
-End Sub
-Private Sub Athena_Token_check_canal_json(ByRef jsonDict As Dictionary, canal As String)
-    Athena_Token_init_canal_json jsonDict
-    If jsonDict(TOKEN_CANAL) <> canal And canal <> "" Then
-        jsonDict(TOKEN_CANAL) = canal
-    End If
-End Sub
-Private Sub Athena_Token_check_tags(ByRef jsonDict As Dictionary, pk As String, tag As String)
-On Error GoTo ErrHndlr
-    Athena_Token_init_marks_json jsonDict
-    
-    If jsonDict(TOKEN_PK) = "" Then jsonDict(TOKEN_PK) = pk
-    If jsonDict(TOKEN_TAG) = "" Then jsonDict(TOKEN_TAG) = tag
-ErrHndlr:
-End Sub
-
-Public Function Athena_Token_set_db(ByRef token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_trace_json jsonDict
-    
-    If (jsonDict(TOKEN_DB_FILE) = "" Or jsonDict(TOKEN_DB_FILE) = "ATHENA_NET_DATA.db") Then
-        Athena_Token_check_db_json jsonDict, getMailBox(token), Athena_Token_get_AreaDeptCod(token), getPath(token)
-        token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-        token.Save
-    End If
-ErrHndlr:
-    Athena_Token_set_db = jsonDict(TOKEN_DB_FILE)
-    Set jsonDict = Nothing
-End Function
-
-Public Function Athena_Token_get_db(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_DB_FILE)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_db = result
-End Function
-
-'Añade un elemento a la lista de eventos del json
-Public Function Athena_Token_Add_Event_JSON(events As Variant, value As String, isAdjust As Boolean, t_adjust As String) As Variant
-    Dim newEvents() As Variant
-    Dim isAdj As String: isAdj = ""
-    If isAdjust Then isAdj = "Ajuste"
-    
-    ReDim newEvents(0 To 0) As Variant
-    If Not IsEmpty(events) And VariantSize(events) > 0 Then
-        newEvents = events
-        ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-    End If
-    newEvents(UBound(newEvents)) = StringArray(value, t_adjust, isAdj, "", getUserLogin, Format(Now, Athena_FullTime_Pattern))
-    
-    Athena_Token_Add_Event_JSON = newEvents
-End Function
-
-' Update token's JSON replacing adjusted event
-Public Sub Athena_Token_Replace_Event_JSON(ByRef token As Outlook.mailItem, mark_new As String, mark_old As String, when As String)
-    ' Init
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_STATUS))
-    Dim rowCount As Integer: rowCount = 0
-    Dim notChanged As Boolean: notChanged = True
-    
-    Do While rowCount = 0 <= UBound(jsonEvent) And notChanged
-        If mark_new <> "" And CDate(jsonEvent(rowCount)(1)) = CDate(mark_old) Then
-            jsonEvent(rowCount)(1) = mark_new
-            jsonEvent(rowCount)(2) = "Ajuste"
-            jsonEvent(rowCount)(5) = when
-            notChanged = False
-        End If
-        rowCount = rowCount + 1
-    Loop
-    
-    jsonDict(TOKEN_EVENTS_STATUS) = Athena_Token_Convert_Events_JSON(jsonEvent)
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = when
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-' Update token's JSON including adjusted event
-Public Sub Athena_Token_Include_Event_JSON(ByRef token As Outlook.mailItem, mark_init As String, mark_end As String, who As String, when As String)
-    Dim stampN As String
-    Dim rowCount As Integer: rowCount = 0
-    Dim newCount As Integer: newCount = 0
-    Dim newEvents() As Variant: ReDim newEvents(0 To 0) As Variant
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    Dim noIncludedInit As Boolean: noIncludedInit = True
-    Dim noIncludedEnd As Boolean: noIncludedEnd = True
-    
-    ' Init
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict("events"))
-    ReDim Preserve newEvents(0 To UBound(jsonEvent))
-    
-    ' Por cada entrada en el JSON
-    For rowCount = 0 To UBound(jsonEvent)
-        stampN = jsonEvent(rowCount)(1)
-        ' Include init mark
-        If mark_init <> "" And CDate(stampN) > CDate(mark_init) And noIncludedInit Then
-            ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-            newEvents(rowCount + newCount) = StringArray(Athena_Mail_Status_Started, mark_init, "Ajuste", "", who, when)
-            newCount = newCount + 1
-            noIncludedInit = False
-        End If
-        
-        ' Include end mark
-        If mark_end <> "" And CDate(stampN) > CDate(mark_end) And noIncludedEnd Then
-            ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-            newEvents(rowCount + newCount) = StringArray(Athena_Mail_Status_Stopped, mark_end, "Ajuste", "", who, when)
-            newCount = newCount + 1
-            noIncludedEnd = False
-        End If
-        
-        ' Record existing one
-        newEvents(rowCount + newCount) = jsonEvent(rowCount)
-    Next
-
-    ' Append Before
-    If UBound(jsonEvent) = UBound(newEvents) Then
-        ' Include init mark
-        If mark_init <> "" Then
-            ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-            newEvents(rowCount + newCount) = StringArray(Athena_Mail_Status_Started, mark_init, "Ajuste", "", who, when)
-            newCount = newCount + 1
-            noIncludedInit = False
-        End If
-        
-        ' Include end mark
-        If mark_end <> "" Then
-            ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-            newEvents(rowCount + newCount) = StringArray(Athena_Mail_Status_Stopped, mark_end, "Ajuste", "", who, when)
-            newCount = newCount + 1
-            noIncludedEnd = False
-        End If
-    End If
-    jsonDict(TOKEN_EVENTS_STATUS) = Athena_Token_Convert_Events_JSON(newEvents)
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-' Update token's JSON discarding event
-Public Sub Athena_Token_Discard_Event_JSON(ByRef token As Outlook.mailItem, t_init_stamp As String, t_end_stamp As String, status_init As String, status_end As String)
-    Dim jsonDict As Dictionary
-    Dim rowCount As Integer
-    Dim newEvents() As Variant
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    ' Init
-    Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict("events"))
-    ReDim Preserve newEvents(0 To UBound(jsonEvent))
-    
-    ' Por cada entrada en el JSON
-    For rowCount = 0 To UBound(jsonEvent)
-        Dim statN As String: statN = jsonEvent(rowCount)(0)
-        Dim stampN As String: stampN = jsonEvent(rowCount)(1)
-        Dim adjN As String: adjN = ""
-        Dim ignoreN As String: ignoreN = ""
-        Dim whoN As String: whoN = "-1"
-        Dim whenN As String: whenN = jsonEvent(rowCount)(1)
-        If UBound(jsonEvent(rowCount)) > 3 Then
-            adjN = jsonEvent(rowCount)(2)
-            ignoreN = jsonEvent(rowCount)(3)
-            whoN = jsonEvent(rowCount)(4)
-            whenN = jsonEvent(rowCount)(5)
-        End If
-        ' Si se corresponde con la marca a descartar >> Actualizar en f(x) del n de elementos
-        If (statN = status_init And stampN = t_init_stamp) Or (statN = status_end And stampN = t_end_stamp) Then
-            newEvents(rowCount) = StringArray(jsonEvent(rowCount)(0), jsonEvent(rowCount)(1), adjN, "Descartado", whoN, t)
-        Else
-            newEvents(rowCount) = StringArray(jsonEvent(rowCount)(0), jsonEvent(rowCount)(1), adjN, ignoreN, whoN, whenN)
-        End If
-    Next
-    
-    jsonDict(TOKEN_EVENTS_STATUS) = Athena_Token_Convert_Events_JSON(newEvents)
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-
-    Set jsonDict = Nothing
-End Sub
-
-Function Athena_Token_get_Status(token As Outlook.mailItem) As String
-    Athena_Token_get_Status = token.CC
-End Function
-
-Sub Athena_Mail_set_status(ByRef token As Outlook.mailItem, status As String)
-On Error GoTo ErrHndlr
-    token.CC = status
-    token.categories = status
-ErrHndlr:
-End Sub
-
-' Check // Only being called with temp status (Classifying, No Classify) ==> Do no check nor events
-Sub Athena_Token_set_Status(ByRef token As Outlook.mailItem, status As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    ' Set
-    jsonDict("token_categories") = Split(token.categories, ";")
-    Athena_Mail_set_status token, status
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-Function Athena_Token_get_EntryID(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_ENTRY_ID)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_EntryID = result
-End Function
-
-Sub Athena_Mail_set_title(ByRef token As Outlook.mailItem, title As String)
-On Error GoTo ErrHndlr
-    If token.ConversationTopic <> title Or token.ConversationTopic = "" Then token.Subject = title
-ErrHndlr:
-End Sub
-
-Function Athena_Token_get_Title(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_TITLE)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Title = result
-End Function
-
-Function Athena_Token_get_Origin(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_ORIGIN)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Origin = result
-End Function
-
-Function Athena_Token_get_OriginCod(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_ORIGIN_COD)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_OriginCod = result
-End Function
-
-Function Athena_Token_get_Name(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_TITLE)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Name = result
-End Function
-
-Function Athena_Mail_set_priority(ByRef token As Outlook.mailItem, priority As String)
-On Error GoTo ErrHndlr
-    If priority = Athena_Mail_Priority_Critical Then
-        token.Importance = olImportanceHigh
-    ElseIf priority = Athena_Mail_Priority_Low Then
-        token.Importance = olImportanceLow
-    Else
-        token.Importance = olImportanceNormal
-    End If
-ErrHndlr:
-End Function
-
-
-Function Athena_Token_get_Prioridad(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_PRIORITY)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Prioridad = result
-End Function
-
-Function Athena_Token_get_Client(token As Outlook.mailItem, client As String) As String
-    
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    Athena_Token_init_client_json jsonDict
-
-    
-    jsonDict(TOKEN_CLIENT) = client
-    
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-
-End Function
-
-
-
-Function Athena_Token_get_PrioridadCod(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_PRIORITY_COD)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_PrioridadCod = result
-End Function
-
-Function Athena_Token_get_AreaDept(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_AREA)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_AreaDept = result
-End Function
-
-Function Athena_Token_get_AreaDeptCod(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_AREA_COD)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_AreaDeptCod = result
-End Function
-
-Function Athena_Token_get_Num_Actions(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_VOLUMEN)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Num_Actions = result
-End Function
-
-Function Athena_Token_get_Comments(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_COMMENT)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Comments = result
-End Function
-
-Function Athena_Token_get_Matrix_Units(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_MATRIX_UNITS)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Matrix_Units = result
-End Function
-
-Function Athena_Token_get_Categoria(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_CAT)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Categoria = result
-End Function
-
-Function Athena_Token_get_AreaDeptCategoriaCod(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_CAT_COD)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_AreaDeptCategoriaCod = result
-End Function
-
-Function Athena_Token_get_Country(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_UNIT)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_Country = result
-End Function
-
-Function Athena_Token_get_CountryCod(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_UNIT_COD)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_CountryCod = result
-End Function
-
-Function Athena_Token_get_UltimaMarca(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = ""
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_LAST_UPDATE_STAMP)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_UltimaMarca = result
-End Function
-
-Public Function Athena_Token_read_Events_JSON(jsonEvent As Variant) As Variant
-    Dim newEvents() As Variant
-    Dim rowCount As Integer
-    Dim skipped As Integer: skipped = 0
-    ReDim newEvents(0 To 0) As Variant
-    If VariantDictSize(jsonEvent) > 0 Then
-        ' New Structure
-        If VarType(jsonEvent) = 8204 Then
-            For rowCount = 0 To VariantDictSize(jsonEvent) - 1
-                If Trim(jsonEvent(rowCount)) <> "" Then
-                    newEvents(rowCount - skipped) = VBA.Split("" & jsonEvent(rowCount), SEP_TOKEN)
-                    ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-                Else
-                    skipped = skipped + 1
-                End If
-            Next
-        ElseIf VarType(jsonEvent.item(1)) = 8 Then
-            For rowCount = 1 To jsonEvent.Count
-                If Trim(jsonEvent.item(rowCount)) <> "" Then
-                    newEvents(rowCount - skipped - 1) = VBA.Split("" & jsonEvent.item(rowCount), SEP_TOKEN)
-                    ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-                Else
-                    skipped = skipped + 1
-                End If
-            Next
-        ' Old One
-        ElseIf VarType(jsonEvent.item(1)) = 9 Then
-            Dim i As Object
-            rowCount = 0
-            For Each i In jsonEvent
-                newEvents(rowCount) = StringArray(i(EVENTO_JSON_STATUS), i(EVENTO_JSON_STAMP), "", "", "-1", i(EVENTO_JSON_STAMP))
-                If i.Count >= 3 Then newEvents(rowCount) = StringArray(i(EVENTO_JSON_STATUS), i(EVENTO_JSON_STAMP), i(EVENTO_JSON_ADJUST), i(EVENTO_JSON_IGNORE), i(EVENTO_JSON_WHO), i(EVENTO_JSON_TIME))
-                rowCount = rowCount + 1
-                ReDim Preserve newEvents(0 To UBound(newEvents) + 1)
-            Next
-        End If
-    End If
-    ' Remove last empty element
-    If UBound(newEvents) > 0 Then ReDim Preserve newEvents(0 To UBound(newEvents) - 1)
-    Athena_Token_read_Events_JSON = newEvents
-End Function
-
-' Converts from Variant/String() to Variant/String to store it at JSON
-Private Function Athena_Token_Convert_Events_JSON(events As Variant) As Variant
-    Dim newEvents() As Variant
-    ReDim newEvents(0 To UBound(events)) As Variant
-    Dim rowCount As Integer
-    For rowCount = 0 To UBound(events)
-        newEvents(rowCount) = VBA.Join(events(rowCount), SEP_TOKEN)
-    Next
-    Athena_Token_Convert_Events_JSON = newEvents
-End Function
-
-' Read JSON events into Variant/String() structure
-Public Function Athena_Token_get_Events_JSON(token As Outlook.mailItem, eventsField As String) As Variant
-    If Not token Is Nothing Then
-        ' Init / Read JSON
-        Dim jsonDict As Dictionary
-        Dim jsonEvent As Variant
-    
-        Set jsonDict = Athena_cJSON.ParseJson(token.body)
-        If jsonDict.Exists(eventsField) Then Set jsonEvent = jsonDict(eventsField) 'jsonDict("events")
-      
-        ' Parse to Variant/String()
-        Athena_Token_get_Events_JSON = Athena_Token_read_Events_JSON(jsonEvent)
-        Set jsonDict = Nothing
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' CONST
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+Public Prop_verbose As Boolean ' = False
+Public Const lowLatency As Boolean = True
+Public Const full_trace As Boolean = False
+'Public Const ATHENA_VERSION As String = "v.0.2.3 01/12/2023"
+Public Const ATHENA_VERSION As String = "v.0.2.5 08/02/2024"
+
+'-----------------------------
+' LOGGER
+'-----------------------------
+Public myLogger As Object
+
+'-----------------------------
+' DICTIONARIES
+'-----------------------------
+Public PropDict As Object
+
+'-----------------------------
+' F(X)
+'-----------------------------
+Public tokenCopied As Outlook.mailItem
+Public blnSearchComp As Boolean
+
+'-----------------------------
+' ERROR MESSAGES
+'-----------------------------
+Public Const info_not_found_err As String = "Sin info para buzon seleccionado"
+Public Const err_token_not_selected As String = "No ha seleccionado un correo correcto de control"
+Public Const err_token_empty_selected As String = "No ha seleccionado ningún correo"
+Public Const err_token_multiple_selected As String = "Ha seleccionado varios correos"
+
+Public Const ATHENA_CONTROL_OK As Integer = 0
+Public Const ATHENA_CONTROL_CANCEL As Integer = 1
+
+
+''' Athena DDBB
+Public RutaLibAthena As String
+Public Athena_log As String
+Public Const DDBB_Athena_file As String = "ATHENA_NET.db"
+Public Const DDBB_Athena_file_data_HIST As String = "ATHENA_NET_DATA_HIST.db"
+Public Const DDBB_Athena_local_file_path As String = "C:\DATOS\ATHENA_TASKMANAGER\db\"
+
+Public Prop_DDBB_Athena_file_path As String
+Public Prop_DDBB_Athena_file_path_reporting As String
+Public Prop_Athena_log_path As String
+Public Prop_Athena_Install_path As String
+
+Public Const Athena_Install_file As String = "Athena_Installer_remote.lnk"
+
+Public Const ESTADOFromCuerpoNDS As Integer = 0
+Public Const UNIDADFromCuerpoNDS As Integer = 1
+Public Const CATEGORIAFromCuerpoNDS As Integer = 2
+Public Const IDMAILFromCuerpoNDS As Integer = 3
+
+Public Const TextOnlyOneFile As String = "Es necesario seleccionar un único correo"
+Public Const TextNoSelectedMail As String = "No hay ningún correo seleccionado"
+Public Const TextOnlyNDSTag As String = "La acción se debe realizar sobre un correo de control ([NDS])"
+Public Const TextNoNDSTag As String = "La acción NO se puede realizar sobre un correo de control ([NDS])"
+Public Const TextSelectMail As String = "Selecciona un elemento válido para iniciar. Selecciona un Mail"
+
+Public Const NdsStateInicio As String = "Inicio"
+Public Const NdsStatePausa As String = "Pausa"
+Public Const NdsStateFin As String = "Fin"
+Public Const NdsStateContinua As String = "Continua"
+Public Const NdsStatePredef As String = "Programada"
+
+Public Const CatEnCurso As String = "En Curso"
+Public Const CatPendiente As String = "Tarea Pendiente"
+
+Public Const CatRober As String = "Roberto"
+Public Const CatAlmu As String = "Almudena"
+Public Const CatJavi As String = "Javi"
+Public Const CatDani As String = "Dani"
+Public Const CatEdu As String = "Edu"
+
+Public Const NDSPrefixSubject As String = "[NDS] - "
+
+' // Search FormVars / campos
+Public Const CAMPO_TITLE_FULL = 0
+Public Const CAMPO_NUM_ACTIONS = 1
+Public Const CAMPO_AREA_COD = 2
+Public Const CAMPO_COUNTRY_COD = 3
+Public Const CAMPO_CATEGORY_COD = 4
+Public Const CAMPO_TIME_ADJUST = 5
+Public Const CAMPO_TIME_START = 6
+Public Const CAMPO_TIME_END = 7
+Public Const CAMPO_POSTPONED = 8
+Public Const CAMPO_REASSIGNED = 9
+Public Const CAMPO_USER_COD = 10
+Public Const CAMPO_ORIGIN_COD = 11
+Public Const CAMPO_AREA = 12
+Public Const CAMPO_COUNTRY = 13
+Public Const CAMPO_CATEGORY = 14
+Public Const CAMPO_USER = 15
+Public Const CAMPO_PRIORITY_COD = 16
+Public Const CAMPO_PRIORITY = 17
+Public Const CAMPO_MAIL_STAMP = 18
+Public Const CAMPO_USER_EMPLOYEE = 19
+Public Const CAMPO_COMMENT = 20
+Public Const CAMPO_ORIGIN = 21
+Public Const CAMPO_INC_OP = 22
+Public Const CAMPO_NUM_ACTIONS_ERR = 23
+Public Const CAMPO_PK = 24
+Public Const CAMPO_TAG = 25
+Public Const CAMPO_MATRIX_UNITS = 26
+Public Const CAMPO_CANAL = 27
+'Public Const CAMPO_CLIENT_COD = 27
+'Public Const CAMPO_CLIENT = 28
+
+'Units
+'''''Cross
+Public Const UNIT_CROSS = "CROSS"
+Public Const UNIT_CROSS_COD = 50
+
+'Token Fields
+Public Const SEP_TOKEN = "|"
+'''''Header
+Public Const TOKEN_TASK_ID = "taskid"
+Public Const TOKEN_TITLE = "title"
+Public Const TOKEN_COMMENT = "comments"
+'''''Times
+Public Const TOKEN_LAST_UPDATE_STAMP = "token_last_update"  'DATE
+Public Const TOKEN_TOKEN_STAMP = "token_stamp"  'DATE
+Public Const TOKEN_MAIL_STAMP = "mail_stamp"  'DATE
+Public Const TOKEN_DUTY_STAMP = "duty_stamp"  'DATE
+'''''Trace
+Public Const TOKEN_CONVERSATION_ID = "token_conversation_id"
+Public Const TOKEN_ENTRY_ID = "token_entry_id"
+Public Const TOKEN_DB_FILE = "db"
+Public Const TOKEN_MAILBOX = "mailbox"
+Public Const TOKEN_PATH = "path"
+Public Const TOKEN_SYNCHRO = "synchronized"
+'''''Category
+Public Const TOKEN_AREA = "area"
+Public Const TOKEN_UNIT = "country"
+Public Const TOKEN_CAT = "category"
+Public Const TOKEN_AREA_COD = "area_dept_cod"
+Public Const TOKEN_UNIT_COD = "unit_cod"
+Public Const TOKEN_CAT_COD = "area_dept_cat_cod"
+Public Const TOKEN_EVENTS_CAT = "events_Area_Dept_Cat"
+Public Const TOKEN_MATRIX_CAT_PRCT = "matrix_area_dept_cat"
+Public Const TOKEN_MATRIX_UNITS = "matrix_units"
+Public Const TOKEN_CANAL = "Canal"
+'''''Status
+Public Const TOKEN_STATUS = "token_categories"
+Public Const TOKEN_STATUS_COD = "status_cod"
+Public Const TOKEN_EVENTS_STATUS = "events"
+'''''Origin
+Public Const TOKEN_ORIGIN = "origin"
+Public Const TOKEN_ORIGIN_COD = "origin_cod"
+'''''Priority
+Public Const TOKEN_PRIORITY = "priority"
+Public Const TOKEN_PRIORITY_COD = "priority_cod"
+Public Const TOKEN_EVENTS_PRIORITY = "events_priority"
+'''''client
+Public Const TOKEN_CLIENT = "client"
+'''''Owner
+Public Const TOKEN_OWNER = "owner"
+Public Const TOKEN_OWNER_COD = "owner_cod"
+Public Const TOKEN_EVENTS_OWNER = "events_owner"
+'''''Volumen
+Public Const TOKEN_VOLUMEN = "num_actions"
+Public Const TOKEN_EVENTS_VOLUMEN = "events_volumen"
+'''''Notes
+Public Const TOKEN_NOTES = "notes"
+'''''Marks
+Public Const TOKEN_PK = "pk"
+Public Const TOKEN_TAG = "tag"
+Public Const TOKEN_INDEX = "index"
+'''''Incident
+Public Const TOKEN_INCIDENT_OP = "incidencia_op"
+Public Const TOKEN_VOLUMEN_ERROR = "num_actions_err"
+Public Const TOKEN_COMUNICA = "comunica"
+'''''Tickets
+Public Const TOKEN_EVENTS_TICKET = "ticket"
+
+
+'Eventos
+Public Const EVENTO_JSON_STATUS = 1
+Public Const EVENTO_JSON_STAMP = 2
+Public Const EVENTO_JSON_ADJUST = 3
+Public Const EVENTO_JSON_IGNORE = 4
+Public Const EVENTO_JSON_WHO = 5
+Public Const EVENTO_JSON_TIME = 6
+
+Public Const Athena_planned_time_morning As Long = 1
+Public Const Athena_planned_time_midday As Long = 2
+
+Public Const Athena_FullTime_Pattern As String = "YYYY-MM-DD HH:MM:SS"
+Public Const Athena_FullDate_Pattern As String = "YYYY-MM-DD"
+Public Const Athena_TraceDate_Pattern As String = "YYYYMMDD"
+Public Const Athena_TraceMonthDate_Pattern As String = "YYYYMMDD"
+Public Const Athena_TimeStamp_Pattern As String = "YYYYMMDD_HHMMSS"
+Public Const Athena_FilterMail_Pattern As String = "D/M/YYYY"
+Public Const Athena_Date_PlannedTask As String = "yyyy.mm.dd"
+
+Public Const AthenaEmptyJson As String = "{'taskid': 0,'is_open': -1,'is_active': -1,'categorias':[null],'origen': null,'conversation': null,'emails': [null],'trace_time_min': null,'last_mark_event': null}"
+
+Public Const Athena_Mail_Desc_Manual = "Manual task"
+
+Public Const Athena_Mail_Status_NoClassify = "#Sin Clasificar" ' Sin Asignar
+Public Const Athena_Mail_StatusCod_NoClassify = 1
+Public Const Athena_Mail_StatusIcon_NoClassify = 323
+
+Public Const Athena_Mail_Status_Classifying = "#Clasificando"
+
+Public Const Athena_Mail_Status_NoStart = "#Sin Iniciar" ' Asignada // DREPRECATED
+Public Const Athena_Mail_StatusCod_NoStart = 3
+Public Const Athena_Mail_StatusIcon_NoStart = 468  '274
+
+Public Const Athena_Mail_Status_Started = "#Iniciada" ' Asiganda
+Public Const Athena_Mail_StatusCod_Started = 2
+Public Const Athena_Mail_StatusIcon_Started = 264
+
+Public Const Athena_Mail_Status_Stopped = "#En Pausa" ' Asignada
+Public Const Athena_Mail_StatusCod_Stopped = 3
+Public Const Athena_Mail_StatusIcon_Stopped = 266
+
+Public Const Athena_Mail_Status_End = "#Finalizada" ' Asignada
+Public Const Athena_Mail_StatusCod_End = 4
+Public Const Athena_Mail_StatusIcon_End = 311
+
+Public Const Athena_Mail_Status_UnAssigned = "#Sin Asignar" ' Sin Asignar + En Pausa
+Public Const Athena_Mail_Owner_UnAssigned = "Sin Asignar" ' Sin Asignar + En Pausa
+Public Const Athena_Mail_OwnerCod_UnAssigned = -1 ' Sin Asignar + En Pausa
+Public Const Athena_Mail_StatusCod_UnAssigned = 5
+Public Const Athena_Mail_StatusIcon_UnAssigned = 280
+
+Public Const Athena_Mail_Status_Discarted = "#Descartado"
+Public Const Athena_Mail_StatusCod_Discarted = 6
+Public Const Athena_Mail_StatusIcon_Discarted = 325
+Public Const Athena_Mail_Status_Discarted_Related = "#Revisado"
+
+Public Const Athena_Role_Admin = "Admin"
+Public Const Athena_Role_AdminCod = "1"
+Public Const Athena_Role_Visor = "Visor"
+Public Const Athena_Role_VisorCod = "2"
+Public Const Athena_Role_Super = "Supervisor"
+Public Const Athena_Role_SuperCod = "3"
+
+''''' Custom Columns
+Public Const Athena_Column_Category = ".Category"
+Public Const Athena_Column_Solver = ".Solver"
+Public Const Athena_Column_Client = ".Client"
+'Public Const Athena_Column_Customer = ".Cliente"
+Public Const Athena_Column_Dept = ".Dept"
+Public Const Athena_Column_Priority = ".Priority"
+Public Const Athena_Column_Comm = ".Comment"
+Public Const Athena_Column_Time = ".Time"
+Public Const Athena_Column_canal = ".Canal"
+
+
+'''' Plannification
+Public Const Athena_Folder_Plann = ":Planificadas"
+Public Const Athena_FolderSub_Plann = ":Marcas"
+Public Const TOKEN_INIT_UPDATE_STAMP = "token_init_stamp"  'DATE
+''Public Const Athena_TimePlann_Pattern As String = "HH:MM" -- left(split(Format(Now, Athena_FullTime_Pattern)," ")(1),5)
+
+'''' View
+Public Const Athena_View = "Athena_TaskManager"
+
+Public Const Athena_Mail_PriorityCod_Critical = 4
+Public Const Athena_Mail_Priority_Critical = "Muy Alta"
+Public Const Athena_Mail_PriorityCod_High = 3
+Public Const Athena_Mail_Priority_High = "Alta"
+Public Const Athena_Mail_PriorityCod_Normal = 2
+Public Const Athena_Mail_Priority_Cliente = "Cliente"
+Public Const Athena_Mail_PriorityCod_Low = 1
+Public Const Athena_Mail_Priority_Low = "Baja"
+
+'Public Const anterior para origin
+'Public Const Athena_Token_origin_Manual = "Manual"
+'Public Const Athena_Token_origin_Manual_Cod = 1
+'Public Const Athena_Token_origin_Email = "Mail"
+'Public Const Athena_Token_origin_Email_Cod = 2
+'Public Const Athena_Token_origin_Planned = "Planificada"
+'Public Const Athena_Token_origin_Planned_Cod = 3
+'Public Const Athena_Token_origin_Ticket = "Ticket"
+'Public Const Athena_Token_origin_Ticket_Cod = 4
+'Public Const Athena_Token_origin_AI = "IA"
+'Public Const Athena_Token_origin_AI_Cod = 5
+
+Public Const Athena_Token_origin_Cliente = "Cliente"
+Public Const Athena_Token_origin_Cliente_Cod = 1
+Public Const Athena_Token_origin_BO = "Back-Office/País"
+Public Const Athena_Token_origin_BO_Cod = 2
+Public Const Athena_Token_origin_FO = "Front Office/Ventas"
+Public Const Athena_Token_origin_FO_Cod = 3
+Public Const Athena_Token_origin_IG = "Implementación global"
+Public Const Athena_Token_origin_IG_Cod = 4
+Public Const Athena_Token_origin_GTB = "GTBDesk"
+Public Const Athena_Token_origin_GTB_Cod = 5
+Public Const Athena_Token_origin_IT = "IT"
+Public Const Athena_Token_origin_IT_Cod = 6
+
+Public Const Athena_Mail_UnAssigned = -1
+
+Public Const Athena_Event_TraceCod = 0
+Public Const Athena_Event_Trace = "Trace"
+Public Const Athena_Event_ActivityCod = 1
+Public Const Athena_Event_Activity = "Status"
+Public Const Athena_Event_OwnershipCod = 2
+Public Const Athena_Event_Ownership = "Assigned"
+Public Const Athena_Event_ClassifiedCod = 3
+Public Const Athena_Event_Classified = "Classified"
+Public Const Athena_Event_PriorizationCod = 4
+Public Const Athena_Event_Priorization = "Priorized"
+Public Const Athena_Event_VolumeCod = 5
+Public Const Athena_Event_Volume = "Volume"
+
+Public Const PR_CONVERSATION_TOPIC = "http://schemas.microsoft.com/mapi/proptag/0x0070001E"
+Public Const PR_CONVERSATION_INDEX = "http://schemas.microsoft.com/mapi/proptag/0x00710102"
+
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' VARS
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+Function checkVersion() As String
+    Dim versionID As Variant
+    versionID = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, "SELECT VER_VERSION FROM M_VER_VERSIONES WHERE M_VER_VERSIONES.VER_ACTIVO = 1", verbose)
+    checkVersion = ""
+    If Not IsEmpty(versionID) And VariantSize(versionID) > 0 Then
+        checkVersion = versionID(0)(0)
     End If
 End Function
+'''''
 
-Function Athena_Token_get_IdDuty(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim result As String: result = "-1"
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    result = jsonDict(TOKEN_TASK_ID)
-ErrHndlr:
-    Set jsonDict = Nothing
-    Athena_Token_get_IdDuty = result
-End Function
-
-Sub Athena_Mail_set_IdDuty(ByRef token As Outlook.mailItem, Optional idDuty As String = "-1")
-On Error GoTo ErrHndlr
-    If idDuty = "-1" Then
-        token.To = "TAREA_ID@" & Format(Now, Athena_TraceMonthDate_Pattern)
-    Else
-        token.To = idDuty & "@" & Format(Now, Athena_TraceMonthDate_Pattern)
-    End If
-ErrHndlr:
+' Initialize stopword Es Dictionary
+Private Sub Class_InitializeProp()
+    ' Load stopwords from file
+    Set PropDict = LoadPropertiesJson(DDBB_Athena_local_file_path + "..\config\TaskManager.properties.json")
 End Sub
-
-Sub Athena_Token_set_IdDuty(ByRef token As Outlook.mailItem, idDuty As String)
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    ' Set
-    If jsonDict(TOKEN_TASK_ID) = "-1" And idDuty <> "-1" Then
-        ' Mail set up
-        Athena_Mail_set_IdDuty token, idDuty
-        ' Json set up
-        jsonDict(TOKEN_TASK_ID) = idDuty
-        ' Update Token body
-        token.BodyFormat = olFormatRichText
-        token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-        token.Save
-    End If
-ErrHndlr:
-    Set jsonDict = Nothing
-End Sub
-
-Sub Athena_Token_set_synchro(ByRef token As Outlook.mailItem, synchro As Boolean)
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    If synchro Then
-        jsonDict(TOKEN_SYNCHRO) = "S"
-    Else
-        jsonDict(TOKEN_SYNCHRO) = "N"
-    End If
-    
-    ' Update Token body
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-ErrHndlr:
-    Set jsonDict = Nothing
-End Sub
-
-' Body
-Sub Athena_Token_set_body(ByRef token As Outlook.mailItem, campos() As String, status_init As String, idDuty As String)
-    Dim jsonDict As Dictionary
-    ' Create / Read
-    If token.body = "" Then
-        Set jsonDict = New Dictionary
-        jsonDict.CompareMode = TextCompare
-    Else
-        Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    End If
-    
-    ' Initialize
-    Athena_Token_init_json jsonDict
-    
-    ' Is there a set up ?
-    If VariantSize(campos) > 0 Then Athena_Token_Update_JSON token, jsonDict, campos, status_init, idDuty
-    
-    ' Update Body
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-End Sub
-
-' Custom Columns
-Sub Athena_Token_set_custom_columns(ByRef token As Outlook.mailItem, campos() As String)
-    'Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    'Custom Columns
-    token.UserProperties.Add(Athena_Column_Category, olText).value = campos(CAMPO_CATEGORY) 'jsonDict(TOKEN_CAT)
-    token.UserProperties.Add(Athena_Column_Solver, olText).value = token.SentOnBehalfOfName 'campos(CAMPO_USER_EMPLOYEE) 'jsonDict(TOKEN_OWNER)
-    token.UserProperties.Add(Athena_Column_Client, olText).value = campos(CAMPO_COUNTRY) 'jsonDict(TOKEN_UNIT)
-    token.UserProperties.Add(Athena_Column_Dept, olText).value = campos(CAMPO_AREA) 'jsonDict(TOKEN_AREA)
-    token.UserProperties.Add(Athena_Column_Priority, olText).value = campos(CAMPO_PRIORITY_COD) 'jsonDict(TOKEN_PRIORITY_COD )
-    'token.UserProperties.Add(Athena_Column_Customer, olText).value = campos(CAMPO_CLIENT_COD)
-    token.UserProperties.Add(Athena_Column_Comm, olText).value = campos(CAMPO_COMMENT) 'jsonDict(TOKEN_COMMENT)
-    token.UserProperties.Add(Athena_Column_Time, olText).value = convertTime(getTotalTimeFromToken(token), False)
-    
-    'token.UserProperties.Add("TM Status", olText).value = jsonDict(TOKEN_STATUS_COD)   ' Duplicado ya con la columna Category >> N/A
-    
-End Sub
-
-'Comments
-Sub Athena_Token_set_comments(ByRef token As Outlook.mailItem, comments As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    jsonDict(TOKEN_COMMENT) = Trim(clearString(comments))
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    Set jsonDict = Nothing
-End Sub
-
-Sub Athena_Mail_set_Owner(ByRef token As Outlook.mailItem, owner_desc As String, owner_cod As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    If owner_cod <> "" Then
-        Athena_Token_check_owner_json jsonDict, getUserEmployee(owner_cod), owner_cod
-        token.SentOnBehalfOfName = owner_desc
-        token.BCC = owner_desc
-    End If
-End Sub
-
-Function Athena_Token_get_Owner(token As Outlook.mailItem) As String
-    Athena_Token_get_Owner = token.SentOnBehalfOfName
-End Function
-
-Function Athena_Token_get_EmployeeOwner(token As Outlook.mailItem) As String
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_owner_json jsonDict
-    Athena_Token_get_EmployeeOwner = jsonDict(TOKEN_OWNER)
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_OwnerCod(token As Outlook.mailItem) As String
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_owner_json jsonDict
-    Athena_Token_get_OwnerCod = jsonDict(TOKEN_OWNER_COD)
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_Volume(token As Outlook.mailItem) As String
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_volumen_json jsonDict
-    Athena_Token_get_Volume = jsonDict(TOKEN_VOLUMEN)
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_PK(token As Outlook.mailItem) As String
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_marks_json jsonDict
-    Athena_Token_get_PK = jsonDict(TOKEN_PK)
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_Synchronized(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_trace_json jsonDict
-    Athena_Token_get_Synchronized = jsonDict(TOKEN_SYNCHRO)
-ErrHndlr:
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_comunica(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_incident_json jsonDict
-    Athena_Token_get_comunica = jsonDict(TOKEN_COMUNICA)
-ErrHndlr:
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_incident(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_incident_json jsonDict
-    Athena_Token_get_incident = jsonDict(TOKEN_INCIDENT_OP)
-ErrHndlr:
-    Set jsonDict = Nothing
-End Function
-
-Function Athena_Token_get_volumen_error(token As Outlook.mailItem) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Athena_Token_init_incident_json jsonDict
-    Athena_Token_get_volumen_error = jsonDict(TOKEN_VOLUMEN_ERROR)
-ErrHndlr:
-    Set jsonDict = Nothing
-End Function
-
-
-
-Sub Athena_Token_set_Incident(ByRef token As Outlook.mailItem, inc_op As String, volumen_error As String, notes As String, comunica As String)
-
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    Athena_Token_init_incident_json jsonDict
-    Athena_Token_init_notes_json jsonDict
-    
-   'If inc_op <> "" Then inc_op = "1"
-    jsonDict(TOKEN_INCIDENT_OP) = inc_op
-    jsonDict(TOKEN_VOLUMEN_ERROR) = volumen_error
-    jsonDict(TOKEN_COMUNICA) = comunica
-    
-  ' End If
-    
-    'Athena_Token_check_notes_json jsonDict, "" & notes
-    
-    jsonDict(TOKEN_NOTES) = notes
-    
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-    
-    
-End Sub
-
-
-Sub Athena_Token_set_Notes(ByRef token As Outlook.mailItem, notes As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    Athena_Token_check_notes_json jsonDict, "" & notes
-    
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-Sub Athena_Token_set_Indexs(ByRef token As Outlook.mailItem, Index As Variant)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    If Not jsonDict.Exists(TOKEN_INDEX) Then jsonDict.Add TOKEN_INDEX, getEmptyEvents
-    
-    ' Index List
-    If VariantSize(Index) > 0 Then
-        jsonDict(TOKEN_INDEX) = Athena_Token_Convert_Events_JSON(Index)
-    Else
-        jsonDict(TOKEN_INDEX) = getEmptyEvents
-    End If
-   
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-Function Athena_isTokenType(token As Outlook.mailItem) As Boolean
-    Athena_isTokenType = Not token.Sent
-End Function
-
-Function Athena_isTokenMarked(token As Outlook.mailItem) As Boolean
-    Athena_isTokenMarked = IsInArray("#", Split(token.categories, ";")) Or IsInArray("#", Split(token.CC, ";"))
-End Function
-
-'Actualiza el estado del borrador (Called by "CambiaEstado")
-Sub Athena_Token_Update_State(ByRef token As Outlook.mailItem, status As String, statusCod As Integer, owner As String, t As String)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    ' Status Info
-    If (Athena_Token_get_Status(token) <> status) Then
-        ' 1º Update JSON
-        ' Stopped >> End?
-        If (Athena_Token_get_Status(token) = Athena_Mail_Status_Stopped And status = Athena_Mail_Status_End) _
-            Or (Athena_Token_get_Status(token) = Athena_Mail_Status_End And status = Athena_Mail_Status_Stopped) Then
-            Athena_Token_check_status_json jsonDict, Athena_Token_get_Status(token), Athena_Mail_Status_Started, False, t
-            t = "" & Format(DateAdd("s", 1, t), Athena_FullTime_Pattern)
-            Athena_Token_check_status_json jsonDict, Athena_Mail_Status_Started, status, False, t
-        Else ' Other >>
-            Athena_Token_check_status_json jsonDict, token.CC, status, False, t
-        End If
-        ' 2º Update Mail
-        Athena_Mail_set_status token, status
-    End If
-    
-    ' Owner Info
-    If owner <> "" Then
-        Dim ownerCod As Integer: ownerCod = getUserCod(owner)
-        Athena_Token_check_owner_json jsonDict, owner, "" & ownerCod
-        Athena_Mail_set_Owner token, getUserName(owner), "" & ownerCod
-    End If
-    
-    Athena_Token_check_db_json jsonDict, getMailBox(token), "" & jsonDict(TOKEN_AREA_COD), getPath(token)
-    
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-
-    token.BCC = token.SentOnBehalfOfName
-    token.BodyFormat = olFormatRichText
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    Call Athena_Token_Update_Icon(token, statusCod)
-    
-    ' Update custom values
-    Dim formVars() As String: formVars = getFormVarsFromToken(token)
-    Athena_Token_set_custom_columns token, formVars
-    
-    Athena_Token_Mark_Read token
-    token.Save
-    
-    Set jsonDict = Nothing
-End Sub
-
-Public Sub Athena_Token_Mark_Read(ByRef token As Outlook.mailItem)
-    If Athena_Token_get_Status(token) = Athena_Mail_Status_End Or Athena_Token_get_Status(token) = Athena_Mail_Status_Discarted Then
-        token.UnRead = False
-    Else
-        token.UnRead = True
-    End If
-End Sub
-
-Public Function Athena_isTokenEvent_Status_Start(status_stat As String) As Boolean
-    Select Case status_stat
-        Case Athena_Mail_Status_Started:
-            Athena_isTokenEvent_Status_Start = True
-        Case Else
-            Athena_isTokenEvent_Status_Start = False
-    End Select
-End Function
-
-'''''''''''''''''''''''''''''''''''''''''''''
-''''''''''''''' SYNCHRONIZE '''''''''''''''''
-'''''''''''''''''''''''''''''''''''''''''''''
-Public Function Athena_Token_push(ByRef token As Outlook.mailItem) As Boolean
-On Error GoTo ErrHndlr
-    Dim refreshed As Boolean
-    Athena_Token_rebuild_json token
-    refreshed = Athena_Token_synchronize(token)
-ErrHndlr:
-    If Err Then
-        Athena_Token_set_synchro token, False
-        refreshed = False
-    End If
-    Athena_Token_push = refreshed
-End Function
-
-Public Function Athena_Token_synchronize(ByRef token As Outlook.mailItem) As Boolean
-On Error GoTo ErrHndlr
-    Dim synchro As Boolean: synchro = True
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    Dim markT As Single
-    
-    ' Where do I Should save it?
-    'Dim db As String: db = Athena_Token_set_db(token)
-    Dim db As String: db = DDBB_Athena_file_data
-    
-    ' Get Insert's
-    markT = time
-    Dim insDuty As String: insDuty = Athena_Token_get_ins_json(jsonDict)
-    Traza lgINFO, "[GENERATE INSERTS] " & vbTab & time - markT & vbTab & time, "Athena_Token_synchronize"
-    
-    ' Save Duty And Duty_Event (And Duty_Matrix)
-    markT = time
-    If DB_DML(DDBB_Athena_file_path & DDBB_Athena_file_data, insDuty, verbose) <= 0 Then synchro = False
-    Traza lgINFO, "[EXECUTE INSERTS] " & vbTab & time - markT & vbTab & time, "Athena_Token_synchronize"
-    
-    ' Mark Token as Synchroned?
-    'Athena_Token_set_synchro token, synchro 'jsonDict(TOKEN_SYNCHRO) = "S"
-    If synchro Then
-        jsonDict(TOKEN_SYNCHRO) = "S"
-    Else
-        jsonDict(TOKEN_SYNCHRO) = "N"
-    End If
-    
-    ' Mark Token as Updated
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    Athena_Token_Mark_Read token
-    token.Save
-    
-    ' TODO? - SAVE IT AS TXT FILE (WHERE?)'
-    synchro = True
-ErrHndlr:
-    Set jsonDict = Nothing
-    If Err Then
-        Athena_Token_synchronize = synchro = False
-        Traza lgFATAL, Err.Description, "Athena_Token_synchronize"
-        Err.Raise Err.Number, Err.Source, Err.Description
-    End If
-    Athena_Token_synchronize = synchro
-End Function
-
-'''''''''''''''''''''''''''''''''''''''''''''
-''''''''' REPAIR / REBUILD TOKEN ''''''''''''
-'''''''''''''''''''''''''''''''''''''''''''''
-Public Sub Athena_Token_rebuild_json(ByRef token As Outlook.mailItem)
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    
-    ' Set Up newest token field set up to date
-    Athena_Token_init_json jsonDict
-    
-    'ID
-    If jsonDict(TOKEN_TASK_ID) = "" Or jsonDict(TOKEN_TASK_ID) = "-1" Then jsonDict(TOKEN_TASK_ID) = getIdDuty
-    
-    ' Status
-    If jsonDict(TOKEN_STATUS_COD) = "" Then jsonDict(TOKEN_STATUS_COD) = getStatusCod("" & jsonDict(TOKEN_STATUS)(1))
-    ' Category
-    If jsonDict(TOKEN_CAT_COD) = "" Then
-        Dim infoCod As Variant: infoCod = Athena_Get_All_AreaDeptCod_From_Token("" & jsonDict(TOKEN_AREA), "" & jsonDict(TOKEN_UNIT), "" & jsonDict(TOKEN_CAT))
-        If Not IsEmpty(infoCod) And VariantSize(infoCod) > 0 Then
-            jsonDict(TOKEN_CAT_COD) = infoCod(0)(0)
-            jsonDict(TOKEN_AREA_COD) = infoCod(0)(1)
-            jsonDict(TOKEN_UNIT_COD) = infoCod(0)(2)
-        End If
-    End If
-    ' Time
-    If jsonDict(TOKEN_TOKEN_STAMP) = "" Then jsonDict(TOKEN_TOKEN_STAMP) = Format(token.CreationTime, Athena_FullTime_Pattern)
-    If jsonDict(TOKEN_DUTY_STAMP) = "" Then jsonDict(TOKEN_DUTY_STAMP) = Format(token.CreationTime, Athena_FullTime_Pattern)
-    ' Owner
-    If jsonDict(TOKEN_OWNER_COD) = "" Then jsonDict(TOKEN_OWNER_COD) = getUserCod(jsonDict(TOKEN_OWNER))
-    ' Origin
-    If jsonDict(TOKEN_ORIGIN_COD) = "" Then jsonDict(TOKEN_ORIGIN_COD) = getOriginCod(jsonDict(TOKEN_ORIGIN))
-    ' Priority
-    If jsonDict(TOKEN_PRIORITY_COD) = "" Then jsonDict(TOKEN_PRIORITY_COD) = getPriorityCod(jsonDict(TOKEN_PRIORITY))
-     ' Client
-    'If jsonDict(TOKEN_CLIENT_COD) = "" Then jsonDict(TOKEN_CLIENT_COD) = getClientCod(jsonDict(TOKEN_CLIENT))
-    'If jsonDict(TOKEN_CLIENT_COD) = "" Then jsonDict (TOKEN_CLIENT)
-    ' Volumen
-    If jsonDict(TOKEN_VOLUMEN) = "" Or Not (esNumeroAccionesValido(jsonDict(TOKEN_VOLUMEN))) Then jsonDict(TOKEN_VOLUMEN) = "1"
-    
-    ' Events Status
-    jsonDict(TOKEN_EVENTS_STATUS) = Athena_Token_Convert_Events_JSON(Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_STATUS)))
-    
-    ' Events Owner
-    Dim eventsOwner As Variant: eventsOwner = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_OWNER))
-    If IsEmpty(eventsOwner) Or VariantSize(eventsOwner) = 0 Then jsonDict(TOKEN_EVENTS_OWNER) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(eventsOwner, "" & jsonDict(TOKEN_OWNER), False, "" & jsonDict(TOKEN_OWNER_COD)))
-    
-    ' Events Priority
-    Dim eventsPriority As Variant: eventsPriority = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_PRIORITY))
-    If IsEmpty(eventsPriority) Or VariantSize(eventsPriority) = 0 Then jsonDict(TOKEN_EVENTS_PRIORITY) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(eventsPriority, "" & jsonDict(TOKEN_PRIORITY_COD), False, ""))
-    
-    ' Events Client
-'    Dim eventsClient As Variant: eventsClient = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_CLIENT))
-'    If IsEmpty(eventsClient) Or VariantSize(eventsClient) = 0 Then jsonDict(TOKEN_EVENTS_CLIENT) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(eventsClient, "" & jsonDict(TOKEN_CLIENT_COD), False, ""))
-    
-    ' Events Classified
-    Dim eventsCategory As Variant: eventsCategory = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_CAT))
-    If IsEmpty(eventsCategory) Or VariantSize(eventsCategory) = 0 Then jsonDict(TOKEN_EVENTS_CAT) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(eventsCategory, "" & jsonDict(TOKEN_CAT_COD), False, ""))
-
-    ' Events Volumen
-    Dim eventsVolumen As Variant: eventsVolumen = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_VOLUMEN))
-    If IsEmpty(eventsVolumen) Or VariantSize(eventsVolumen) = 0 Then jsonDict(TOKEN_EVENTS_VOLUMEN) = Athena_Token_Convert_Events_JSON(Athena_Token_Add_Event_JSON(eventsVolumen, "" & jsonDict(TOKEN_VOLUMEN), False, ""))
-
-    ' Matrix
-    If jsonDict(TOKEN_UNIT) = UNIT_CROSS And jsonDict(TOKEN_CAT_COD) <> "-1" Then Athena_Token_check_matrix_units_json jsonDict, jsonDict(TOKEN_CAT_COD)
-    If jsonDict(TOKEN_UNIT) = UNIT_CROSS Then Athena_Token_check_matrix_json jsonDict, "" & jsonDict(TOKEN_MATRIX_UNITS)
-    
-    Athena_Token_check_trace_json jsonDict, token
-    
-    jsonDict(TOKEN_LAST_UPDATE_STAMP) = t
-    jsonDict(TOKEN_SYNCHRO) = "N"
-    token.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-    
-    token.BCC = token.SentOnBehalfOfName
-    
-    token.Save
-ErrHndlr:
-    Set jsonDict = Nothing
-    If Err Then
-        Call Traza(lgFATAL, Err.Description, "Athena_Token_rebuild_json")
-        Err.Raise Err.Number, Err.Source, Err.Description
-    End If
-End Sub
-
-'''''''''''''''''''''''''''''''''''''''''''''
-''''''''''''' QUERY SNAPSHOT ''''''''''''''''
-'''''''''''''''''''''''''''''''''''''''''''''
-Public Function Athena_Token_get_ins_json(jsonDict As Dictionary) As String
-    Dim t As String: t = Format(Now, Athena_FullTime_Pattern)
-    ' Duty
-    Dim sqlInsDuty As String: sqlInsDuty = Athena_Token_get_ins_duty_json(jsonDict, t)
-    ' Duty Event
-    Dim sqlInsDutyEvent As String: sqlInsDutyEvent = Athena_Token_get_ins_dutyevent_json(jsonDict, t)
-    ' Duty Matrix
-    Dim sqlInsDutyMatrix As String: sqlInsDutyMatrix = Athena_Token_get_ins_dutymatrix_json(jsonDict, t)
-    ' Duty Var
-    Dim sqlInsDutyVar As String: sqlInsDutyVar = Athena_Token_get_ins_dutyvar_json(jsonDict, t)
-    
-    Athena_Token_get_ins_json = sqlInsDuty & ";" & vbNewLine & sqlInsDutyEvent & ";" & sqlInsDutyMatrix & ";" & sqlInsDutyVar
-    
-End Function
-
-Public Function Athena_Token_get_ins_duty_json(jsonDict As Dictionary, t As String) As String
-    Dim is_inc As String
-    Dim v_err As String: v_err = "null"
-    Dim miTask As New TaskManagerForm
-'    If jsonDict(TOKEN_INCIDENT_OP) <> "" Then
-'        is_inc = "'" & jsonDict(TOKEN_INCIDENT_OP) & "'"
-'        v_err = "'" & jsonDict(TOKEN_VOLUMEN_ERROR) & "'"
-'    End If
-
-    Athena_Token_get_ins_duty_json = "INSERT OR REPLACE INTO DUTY " _
-    & "(DUTY_COD, STATUS_COD, TOKEN_ENTRY_ID, CAT_AREA_UNIT_COD, ORIGIN_COD, NAME, OWNER_COD, PRIOR_COD, LAST_EVENT_STAMP, PK, VOLUME, WHO, `WHEN`, CLIENT, IS_INC, VOLUMEN_ERR, COMENTARIOS) " _
-    & " SELECT '" & jsonDict(TOKEN_TASK_ID) & "'," & jsonDict(TOKEN_STATUS_COD) & ",'" & jsonDict(TOKEN_ENTRY_ID) & "'," & jsonDict(TOKEN_CAT_COD) & "," & jsonDict(TOKEN_ORIGIN_COD) _
-    & ",'" & clearString(jsonDict(TOKEN_TITLE)) & "'," & jsonDict(TOKEN_OWNER_COD) & "," & jsonDict(TOKEN_PRIORITY_COD) & ",'" & jsonDict(TOKEN_LAST_UPDATE_STAMP) & "','" & jsonDict(TOKEN_PK) _
-    & "'," & jsonDict(TOKEN_VOLUMEN) & ",'" & getUserLogin & "','" & t & "','" & jsonDict(TOKEN_CLIENT) & "','" & jsonDict(TOKEN_INCIDENT_OP) & "','" & v_err & "','" & jsonDict(TOKEN_NOTES) & "'"
-    
-End Function
-
-
-Private Function Athena_Token_get_ins_dutyevent_json(jsonDict As Dictionary, t As String) As String
-    Dim insSQL As String
-    insSQL = "UPDATE DUTY_EVENT SET IGNORE = 1 WHERE DUTY_COD = '" & jsonDict(TOKEN_TASK_ID) & "';"
-    insSQL = insSQL & vbNewLine & " INSERT OR REPLACE INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) "
-    insSQL = insSQL & vbNewLine & Athena_Token_get_ins_dutyevent_times_json(jsonDict, t)
-    
-    Dim insEventStatus As String: insEventStatus = Athena_Token_get_ins_dutyevent_status_json(jsonDict, t)
-    If insEventStatus <> "" Then insSQL = insSQL & vbNewLine & " UNION ALL " & insEventStatus
-    
-    If full_trace Then
-        Dim insEventOwner As String: insEventOwner = Athena_Token_get_ins_dutyevent_owner_json(jsonDict, t)
-        Dim insEventCat As String: insEventCat = Athena_Token_get_ins_dutyevent_category_json(jsonDict, t)
-        Dim insEventPriority As String: insEventPriority = Athena_Token_get_ins_dutyevent_priority_json(jsonDict, t)
-        Dim insEventVolumen As String: insEventVolumen = Athena_Token_get_ins_dutyevent_volumen_json(jsonDict, t)
-        
-        If insEventOwner <> "" Then insSQL = insSQL & vbNewLine & " UNION ALL " & insEventOwner
-        If insEventCat <> "" Then insSQL = insSQL & vbNewLine & " UNION ALL " & insEventCat
-        If insEventPriority <> "" Then insSQL = insSQL & vbNewLine & " UNION ALL " & insEventPriority
-        If insEventVolumen <> "" Then insSQL = insSQL & vbNewLine & " UNION ALL " & insEventVolumen
-    End If
-    
-    Athena_Token_get_ins_dutyevent_json = insSQL
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_times_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim Sql As String ' MAIL_STAMP / TOKEN_STAMP / DUTY_STAMP ( EVENT_COD = 0 )
-    Sql = Sql & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_TraceCod & ",'" & jsonDict(TOKEN_MAIL_STAMP) & "','" & getUserLogin & "','MAIL', null, null,'" & jsonDict(TOKEN_DUTY_STAMP) & "'"
-    Sql = Sql & vbNewLine & " UNION ALL SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_TraceCod & ",'" & jsonDict(TOKEN_TOKEN_STAMP) & "','" & getUserLogin & "','TOKEN', null, null,'" & jsonDict(TOKEN_DUTY_STAMP) & "'"
-    Sql = Sql & vbNewLine & " UNION ALL SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_TraceCod & ",'" & jsonDict(TOKEN_DUTY_STAMP) & "','" & getUserLogin & "','DUTY', null, null,'" & jsonDict(TOKEN_DUTY_STAMP) & "'"
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_times_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_status_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_STATUS))
-    Dim Sql As String: Sql = "" ' INICIOS / PARADAS / FIN ( EVENT_COD = 1 )
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'  "#En Pausa|2023-09-12 11:14:19|||n497208|2023-09-12 11:14:19",
-        Dim statN As String: statN = jsonEvent(rowCount)(0)
-        Dim stampN As String: stampN = jsonEvent(rowCount)(1)
-        Dim adjN As String: adjN = "null"
-        Dim ignoreN As String: ignoreN = "null"
-        Dim whoN As String: whoN = "-1"
-        Dim whenN As String: whenN = t
-        
-        If UBound(jsonEvent(rowCount)) > 3 Then
-            If jsonEvent(rowCount)(2) <> "" Then adjN = "'1'"
-            If jsonEvent(rowCount)(3) <> "" Then ignoreN = "'1'"
-            If jsonEvent(rowCount)(4) <> "" Then whoN = jsonEvent(rowCount)(4)
-            If jsonEvent(rowCount)(5) <> "" Then whenN = jsonEvent(rowCount)(5)
-        End If
-        
-        Sql = Sql & sep & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_ActivityCod & ",'" & stampN & "','" & whoN & "','" & getStatusCod(statN) & "'," & adjN & "," & ignoreN & ",'" & whenN & "'"
-        sep = vbNewLine & " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_status_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_owner_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_OWNER))
-    Dim Sql As String: Sql = "" ' PARA TI / PARA MI ( EVENT_COD = 2 )
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'   "n54286|1|||n54286|2023-09-22 15:04:55"
-        Dim value As String: value = jsonEvent(rowCount)(1)
-        Dim adjN As String: adjN = "null"
-        Dim ignoreN As String: ignoreN = "null"
-        Dim whoN As String: whoN = jsonEvent(rowCount)(4)
-        Dim whenN As String: whenN = jsonEvent(rowCount)(5)
-        
-        Sql = Sql & sep & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_OwnershipCod & ",'" & whenN & "','" & whoN & "','" & value & "'," & adjN & "," & ignoreN & ",'" & t & "'"
-        sep = vbNewLine & " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_owner_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_category_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_CAT))
-    Dim Sql As String: Sql = "" ' CLASIFICACIONES ( EVENT_COD = 3 )
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'     "1561||||n54286|2023-09-22 13:35:01"
-        Dim value As String: value = jsonEvent(rowCount)(0)
-        Dim adjN As String: adjN = "null"
-        Dim ignoreN As String: ignoreN = "null"
-        Dim whoN As String: whoN = jsonEvent(rowCount)(4)
-        Dim whenN As String: whenN = jsonEvent(rowCount)(5)
-        
-        Sql = Sql & sep & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_ClassifiedCod & ",'" & whenN & "','" & whoN & "','" & value & "'," & adjN & "," & ignoreN & ",'" & t & "'"
-        sep = vbNewLine & " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_category_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_priority_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_PRIORITY))
-    Dim Sql As String: Sql = "" ' PRIORIZACION ( EVENT_COD = 4 )
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'     "Normal|2|||n54286|2023-09-22 18:40:04"
-        Dim value As String: value = jsonEvent(rowCount)(1)
-        Dim adjN As String: adjN = "null"
-        Dim ignoreN As String: ignoreN = "null"
-        Dim whoN As String: whoN = jsonEvent(rowCount)(4)
-        Dim whenN As String: whenN = jsonEvent(rowCount)(5)
-        
-        Sql = Sql & sep & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_PriorizationCod & ",'" & whenN & "','" & whoN & "','" & value & "'," & adjN & "," & ignoreN & ",'" & t & "'"
-        sep = vbNewLine & " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_priority_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyevent_volumen_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_VOLUMEN))
-    Dim Sql As String: Sql = "" ' VOLUMEN ( EVENT_COD = 5 )
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'       "0||||n54286|2023-09-22 18:40:13"
-        Dim value As String: value = jsonEvent(rowCount)(0)
-        Dim adjN As String: adjN = "null"
-        Dim ignoreN As String: ignoreN = "null"
-        Dim whoN As String: whoN = jsonEvent(rowCount)(4)
-        Dim whenN As String: whenN = jsonEvent(rowCount)(5)
-        
-        Sql = Sql & sep & " SELECT '" & jsonDict(TOKEN_ENTRY_ID) & "','" & jsonDict(TOKEN_TASK_ID) & "'," & Athena_Event_VolumeCod & ",'" & whenN & "','" & whoN & "','" & value & "'," & adjN & "," & ignoreN & ",'" & t & "'"
-        sep = vbNewLine & " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyevent_volumen_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutymatrix_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim Sql As String: Sql = "" ' VOLUMEN ( EVENT_COD = 5 )
-    If jsonDict(TOKEN_UNIT) = UNIT_CROSS Then
-        
-        Sql = "DELETE FROM DUTY_MATRIX WHERE DUTY_COD = '" & jsonDict(TOKEN_TASK_ID) & "';"
-        Sql = Sql & vbNewLine & " INSERT OR REPLACE INTO DUTY_MATRIX ( DUTY_COD, AREA_DEPT_CAT_COD, PORCENTAJE) "
-        Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_MATRIX_CAT_PRCT))
-        
-        Dim sep As String: sep = ""
-        Dim rowCount As Long
-        
-        For rowCount = 0 To UBound(jsonEvent)
-    '       "2310|0.5"
-            Dim area_dept_cat_cod As String: area_dept_cat_cod = jsonEvent(rowCount)(0)
-            Dim prct As String: prct = jsonEvent(rowCount)(1)
-            
-            Sql = Sql & vbNewLine & sep & " SELECT '" & jsonDict(TOKEN_TASK_ID) & "'," & area_dept_cat_cod & "," & prct & " "
-            sep = " UNION ALL "
-        Next
-        Sql = Sql & ";"
-    End If
-ErrHndlr:
-    Athena_Token_get_ins_dutymatrix_json = Sql
-End Function
-
-Private Function Athena_Token_get_ins_dutyvar_json(jsonDict As Dictionary, t As String) As String
-On Error GoTo ErrHndlr
-    Dim Sql As String: Sql = ""
-    
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_INDEX))
-    Dim sep As String: sep = ""
-    Dim rowCount As Long
-    
-    Sql = "DELETE FROM DUTY_VAR WHERE DUTY_COD = '" & jsonDict(TOKEN_TASK_ID) & "';"
-    Sql = Sql & vbNewLine & " INSERT OR REPLACE INTO DUTY_VAR ( DUTY_COD, INDEX_COD, VALUE ) "
-    
-    For rowCount = 0 To UBound(jsonEvent)
-'       "ISIN|000000000000001"
-        Dim Index As String: Index = jsonEvent(rowCount)(0)
-        Dim value As String: value = jsonEvent(rowCount)(1)
-        
-        Sql = Sql & vbNewLine & sep & " SELECT '" & jsonDict(TOKEN_TASK_ID) & "','" & Index & "','" & value & "' "
-        sep = " UNION ALL "
-    Next
-ErrHndlr:
-    If Err Then
-        'Debug.Print Err
-        Sql = ""
-    End If
-    Athena_Token_get_ins_dutyvar_json = Sql
-End Function
-
-Public Function getFormVarsFromToken(token As mailItem) As Variant
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    
-    'LOGICA DE DRAFT/TOKEN
-        'GLOBAL_TITLE_FULL, GLOBAL_NUM_ACTIONS, _
-        'GLOBAL_AREA_COD, GLOBAL_COUNTRY_COD, GLOBAL_CATEGORY_COD, _
-        'GLOBAL_TIME_ADJUST, GLOBAL_TIME_START, GLOBAL_TIME_END, _
-        'GLOBAL_POSTPONED, GLOBAL_REASSIGNED, GLOBAL_USER_COD, GLOBAL_ORIGIN_COD, _
-        'GLOBAL_AREA, GLOBAL_COUNTRY, GLOBAL_CATEGORY, GLOBAL_USER, GLOBAL_PRIORITY_COD, GLOBAL_PRIORITY, _
-        'GLOBAL_MAIL_STAMP, GLOBAL_USER_EMPLOYEE, COMMENTS, GLOBAL_ORIGIN, GLOBAL_INC_OP, GLOBAL_NUM_ACTIONS_ERR
-        'GLOBAL_PK, GLOBAL_TAG, GLOBAL_MATRIX_UNITS
-        
-    Dim formVars() As String: formVars = StringArray(jsonDict(TOKEN_TITLE), jsonDict(TOKEN_VOLUMEN), _
-            jsonDict(TOKEN_AREA_COD), jsonDict(TOKEN_UNIT_COD), jsonDict(TOKEN_CAT_COD), _
-            False, 0, 0, _
-            True, True, jsonDict(TOKEN_OWNER_COD), jsonDict(TOKEN_ORIGIN_COD), _
-            jsonDict(TOKEN_AREA), jsonDict(TOKEN_UNIT), jsonDict(TOKEN_CAT), jsonDict(TOKEN_OWNER), jsonDict(TOKEN_PRIORITY_COD), jsonDict(TOKEN_PRIORITY), _
-            jsonDict(TOKEN_MAIL_STAMP), jsonDict(TOKEN_OWNER), jsonDict(TOKEN_COMMENT), jsonDict(TOKEN_ORIGIN), jsonDict(TOKEN_INCIDENT_OP), jsonDict(TOKEN_VOLUMEN_ERROR), _
-            jsonDict(TOKEN_PK), "", "")
-    
-    getFormVarsFromToken = formVars
  
+' Load stopword Es Dictionary into class var
+Private Function LoadPropertiesJson(ByVal filePath As String) As Object
+On Error GoTo ErrHndlr
+    ' Check if the file exists
+    If Dir(filePath) = "" Then
+       Err.Raise -1, "LoadProperties", "Properties file not found"
+    End If
+    ' Read stopwords from the file and add them to the dictionary
+    Dim fileContent As String
+    Dim fileLines As Variant
+    Open filePath For Input As #1
+    fileContent = Input$(LOF(1), 1)
+    Close #1
+ 
+    ' Create a Dictionary to store stopwords
+    Set LoadPropertiesJson = Athena_cJSON.ParseJson(fileContent)
 ErrHndlr:
-    Set jsonDict = Nothing
+    If Err Then Debug.Print Err.Description
+    If LoadPropertiesJson Is Nothing Then Err.Raise -1, "LoadProperties", "Properties file not found"
+End Function
+
+Public Function verbose()
+    If PropDict Is Nothing Then Class_InitializeProp
+    verbose = LCase(PropDict("TM.verbose")) = "true"
+End Function
+
+'v.0.3.0 ==> //LOCAL
+Public Function DDBB_Athena_file_path()
+    DDBB_Athena_file_path = DDBB_Athena_local_file_path
+End Function
+'v.0.3.0 ==> //REMOTE
+Public Function DDBB_Athena_file_path_remote()
+    If PropDict Is Nothing Then Class_InitializeProp
+    DDBB_Athena_file_path_remote = PropDict("TM.remotePath.bbdd")
+End Function
+Public Function DDBB_Athena_file_path_reporting()
+    If PropDict Is Nothing Then Class_InitializeProp
+    DDBB_Athena_file_path_reporting = PropDict("TM.remotePath.reporting")
+End Function
+Public Function Athena_log_path()
+    If PropDict Is Nothing Then Class_InitializeProp
+    Athena_log_path = PropDict("TM.remotePath.log")
+End Function
+Public Function Athena_Install_path()
+    If PropDict Is Nothing Then Class_InitializeProp
+    Athena_Install_path = PropDict("TM.remotePath.install")
 End Function
 
 
-Public Function getTotalTimeFromToken(token As mailItem) As Double
+Function DDBB_Athena_file_data(Optional token As Outlook.mailItem = Nothing) As String
 On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary: Set jsonDict = Athena_cJSON.ParseJson(token.body)
-    Dim jsonEvent As Variant: jsonEvent = Athena_Token_read_Events_JSON(jsonDict(TOKEN_EVENTS_STATUS))
-    Dim rowCount As Integer
-    Dim direction As Integer: direction = -1
-    Dim total As Double: total = 0
-    Dim stamp As String
-    Dim statN As String
-    Dim stampN As String
+    Dim db As String: db = "ATHENA_NET_DATA.db"
     
-    ' Por cada entrada en el JSON
-    For rowCount = 0 To UBound(jsonEvent)
-        If VariantSize(jsonEvent(rowCount)) > 0 Then
-            If VariantSize(jsonEvent(rowCount)) < 3 Or jsonEvent(rowCount)(3) = "" Then
-                ' Recoger marcas
-                statN = jsonEvent(rowCount)(0)
-                stampN = jsonEvent(rowCount)(1)
-                'Evento de Inicio
-                If Athena_isTokenEvent_Status_Start(statN) Then
-                    Select Case direction
-                        Case -1:
-                            direction = 1
-                            stamp = stampN
-                        Case 0: ' Cerrar marca
-                            direction = 1
-                            stamp = stampN
-                        Case 1: ' Error
-                    End Select
-                'Evento de Parada
-                Else
-                    Select Case direction
-                        Case -1: ' 1º registro >> IGNORA
-                        Case 0:  ' PAUSA + PAUSA => IGNORAR
-                        Case 1:  ' Cerrar marca
-                            direction = 0
-                            total = total + CalcTime(stamp, stampN)
-                    End Select
+    ' New Method 3.0 >> Everything stored at local db
+    ' Get local db name
+    Dim ddbb_file_dest As String: ddbb_file_dest = Replace(db, ".db", "_" & UCase(getUserLogin) & ".db")
+    ' Check if there is such db at local path
+    If Len(Dir$(DDBB_Athena_local_file_path & ddbb_file_dest)) = 0 Then
+        ' Check if there is such db at net path
+        If Len(Dir$(DDBB_Athena_file_path_remote & "usr\" & ddbb_file_dest)) = 0 Then
+            ' There is no remote too >> Create local one from empty copy
+            FileCopy DDBB_Athena_file_path_remote & "ATHENA_NET_DATA_EMPTY.db", DDBB_Athena_file_path & ddbb_file_dest
+        Else
+            ' Download already remote usr db
+            FileCopy DDBB_Athena_file_path_remote & ddbb_file_dest, DDBB_Athena_file_path & ddbb_file_dest
+        End If
+    Else
+        '// Do Nothing
+    End If
+    
+    DDBB_Athena_file_data = ddbb_file_dest
+
+ErrHndlr:
+    If Err Then
+        MsgBox "Imposible saber dónde se debe guardar el token." & vbNewLine & vbNewLine & Err.Number & " - " & Err.Description
+        Traza lgFATAL, Err.Number & " " & Err.Description, "DDBB_Athena_file_data"
+        db = "ATHENA_NET_DATA.db"
+    End If
+End Function
+
+Function DDBB_Athena_file_data_dept(mailbox As String, Area_Dept_Cod As String) As String
+    On Error Resume Next
+    ' Puede que no esté definido el buzón por lo que se devolverá el genérico "ATHENA_NET_DATA.db"
+    DDBB_Athena_file_data_dept = "ATHENA_NET_DATA.db"
+    Dim ddbbDataFile As Variant
+    ddbbDataFile = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT(mailbox, Area_Dept_Cod), verbose)
+    If Not IsEmpty(ddbbDataFile) And VariantSize(ddbbDataFile) > 0 Then
+        DDBB_Athena_file_data_dept = ddbbDataFile(0)(1)
+    End If
+End Function
+
+
+Sub initLog(Optional overwrite As Boolean = False)
+    Athena_log = Format(Now, Athena_TimeStamp_Pattern) & "_ATHENA_LOGGER_" & getUserLogin & ".log"
+    Dim LOG_Athena_local_file_path As String: LOG_Athena_local_file_path = DDBB_Athena_local_file_path & "..\log\"
+    
+    Dim StrFileExists As String: StrFileExists = Dir(LOG_Athena_local_file_path, vbDirectory)
+    If StrFileExists = "" Then '"The selected path doesn't exist"
+        If verbose Then Debug.Print "Path not found. Creating " & LOG_Athena_local_file_path
+        MyMkDir LOG_Athena_local_file_path
+    End If
+    If (hayConexionRed(DDBB_Athena_file_path_remote)) Then
+        ' Subida del fichero de log personal a red cuando se cierre
+        Call copyLog(Athena_log, LOG_Athena_local_file_path, Athena_log_path)
+    End If
+    
+    ' Set up Logger
+    Set myLogger = Logging.getNewLogger("Athena")
+    Call myLogger.setLoggigParams(Logging.lgALL, False, False, True) 'nivel de traza,salidas consola, buffer, fichero
+    Call myLogger.setLogFile(LOG_Athena_local_file_path & Athena_log, overwrite) 'nombre de fichero, sobreescribir
+    Call myLogger.logINFO("User " & getUserLogin & " started up with version..." & ATHENA_VERSION, "initLog")
+    
+End Sub
+
+Function initUserPath(Optional overwrite_local_DB As Boolean = False, Optional initL As Boolean = False) As Integer
+    Dim res As Integer: res = 0
+    RutaLibAthena = DDBB_Athena_local_file_path & "..\lib\" ''' stored sqlite3.dll
+    
+    If (initL) Then Call initLog(True) ' Not initialized logs
+    
+    Dim hayConexion As Boolean: hayConexion = hayConexionRed(DDBB_Athena_file_path_remote)
+    If (hayConexion) Then
+        ' Brings _NET to local path
+        Call copyFileFromNet(DDBB_Athena_file, DDBB_Athena_file_path_remote, DDBB_Athena_local_file_path, overwrite_local_DB)
+        
+        ' Brings DLL's to local path
+        If overwrite_local_DB Then
+            #If Win64 Then
+                Call copyFileFromNet("sqlite3.dll", DDBB_Athena_file_path_remote & "lib\x64\", RutaLibAthena & "\x64\", overwrite_local_DB)
+            #Else
+                Call copyFileFromNet("sqlite3.dll", DDBB_Athena_file_path_remote & "lib\", RutaLibAthena, overwrite_local_DB)
+                Call copyFileFromNet("SQLite3_StdCall.dll", DDBB_Athena_file_path_remote & "lib\", RutaLibAthena, overwrite_local_DB)
+            #End If
+        End If
+        
+        'Check version to update local file
+        If Not checkVersion = ATHENA_VERSION Then
+            ' Brings .lnk installer to local path
+            Call copyFileFromNet(Athena_Install_file, Athena_Install_path, DDBB_Athena_local_file_path & "..\", overwrite_local_DB)
+            
+            'Call Shell("explorer.exe " & DDBB_Athena_local_file_path, vbNormalFocus)
+                    
+            Dim msg As String: msg = "No dispone de la última versión del Gestor de la Demanda." & vbNewLine & "Por favor: " & vbNewLine _
+                & vbNewLine & "1º. Cierre el outlook completamente." _
+                & vbNewLine & "2º. Ejecute el instalador ( " & DDBB_Athena_local_file_path & "..\" & Athena_Install_file & ")" _
+                & vbNewLine & vbNewLine & "Es OBLIGATORIA la actualización"
+                
+            MsgBox msg, vbCritical, "Project codename: ATHENA. Nueva versión"
+            If Not initL Then Err.Raise -99, "TaskManager Error", msg
+        End If
+
+        res = 0
+        If Not initL Then If Not hayConexionOutlook Then res = -1
+    Else
+        res = -1
+    End If
+On Error Resume Next
+    ' Remove Local Views
+    If (overwrite_local_DB) Then MkDir Athena_Get_MailBoxXMLPath("", True)
+    If (overwrite_local_DB) Then Kill Athena_Get_MailBoxXMLPath("", True) & "*"
+    
+    ' Upload usr local db file
+    If (overwrite_local_DB And hayConexion) Then doUploadUsrDB
+    
+    initUserPath = res
+End Function
+
+Sub doUploadUsrDB()
+On Error Resume Next
+    Dim hayConexion As Boolean: hayConexion = hayConexionRed(DDBB_Athena_file_path_remote)
+    Dim ddbb_file_dest As String: ddbb_file_dest = DDBB_Athena_file_data
+    If (hayConexion) Then
+        copyFileFromNet ddbb_file_dest, DDBB_Athena_file_path, DDBB_Athena_file_path_remote & "usr\", True
+    End If
+End Sub
+
+Sub dwnloadRemoteData(ddbb_file As String, Optional overwrite As Boolean = False)
+    If (hayConexionRed(DDBB_Athena_file_path_remote)) Then
+        copyFileFromNet ddbb_file, DDBB_Athena_file_path_remote, DDBB_Athena_local_file_path, overwrite
+    End If
+End Sub
+
+Function getQueryMailBoxBelongs() As String
+    getQueryMailBoxBelongs = "SELECT DISTINCT MAILBOX.EMAIL FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " _
+    & " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+    & " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE USER.USER_EMPLOYEE = '" & getUserLogin & "'"
+End Function
+
+Function getQueryMailBoxDBFileBelongs() As String
+    getQueryMailBoxDBFileBelongs = "SELECT DISTINCT COALESCE (AREA_DEPT.DDBB_DATA_FILE,MAILBOX.DDBB_DATA_FILE) FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " _
+    & " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+    & " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE USER.USER_EMPLOYEE = '" & getUserLogin & "'"
+End Function
+
+Public Sub breakConstraintPK(ddbb_dest As String)
+    ' Break PK Constraint at DUTY
+    Call DB_DDL(ddbb_dest, "ALTER TABLE DUTY RENAME TO DUTY1", verbose)
+    Call DB_DDL(ddbb_dest, "CREATE TABLE DUTY AS SELECT * FROM DUTY1", verbose)
+    Call DB_DDL(ddbb_dest, "DROP TABLE IF EXISTS DUTY1", verbose)
+End Sub
+
+Private Function prepareFileData(Optional dbData As String = "", Optional removeTable As Boolean = True) As String
+    Dim ddbb_file_dest As String
+    
+    ' Define dest file
+    If dbData = "" Then
+        ddbb_file_dest = "ATHENA_NET_DATA_" & Format(Now, Athena_TraceDate_Pattern) & ".db"
+    Else
+        ddbb_file_dest = dbData
+    End If
+    
+    ' Clear or Copy Blank?
+    If Len(Dir$(DDBB_Athena_local_file_path & ddbb_file_dest)) > 0 Then
+        If removeTable Then
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY_EVENT;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY_MATRIX;", verbose)
+        Else
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY_EVENT;", verbose)
+            Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DELETE FROM DUTY_MATRIX;", verbose)
+        End If
+    Else
+        FileCopy DDBB_Athena_file_path_remote & "ATHENA_NET_DATA_EMPTY.db", DDBB_Athena_local_file_path & ddbb_file_dest
+    End If
+    
+    prepareFileData = ddbb_file_dest
+End Function
+
+Function dwnloadAllRemoteUsrData(Optional emailXml As String = "", Optional ddbb_file_data As String = "") As String
+    Dim ddbb_files As Variant
+    Dim i As Long
+    Dim ddbb_file_dest As String
+    ' *** 1º *** PREPARE
+    ' Prepare dest file //Clear structure if exists (False) //Copy blank if does not
+    ddbb_file_dest = prepareFileData(ddbb_file_data, False)
+    
+    ' Delete all prev existing usr data files locally
+    Call ClearDir(DDBB_Athena_local_file_path & "usr\", "*.db")
+    
+    ' *** 2º *** DATA
+    ' Get All employees id's under selected mailbox
+    Dim Sql As String: Sql = "SELECT DISTINCT UPPER(USER_EMPLOYEE)" & _
+                                " FROM AREA_USER INNER JOIN USER ON AREA_USER.USER_COD = USER.USER_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_USER.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD "
+    If emailXml <> "" Then Sql = Sql & " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & emailXml & "'"
+                                
+    ' Query it at _NET file
+    ddbb_files = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(ddbb_files) And VariantSize(ddbb_files) > 0 Then
+        For i = 0 To UBound(ddbb_files)
+            ' Get Next employee id
+            If Not IsEmpty(ddbb_files(i)) Then
+                Dim ddbb_file As String: ddbb_file = "ATHENA_NET_DATA_" & ddbb_files(i)(0) & ".db"
+                Dim ddbb_file_id As String: ddbb_file_id = ddbb_files(i)(0)
+                
+                ' Check if exists remote usr data db file
+                If Len(Dir$(DDBB_Athena_file_path_remote & "usr\" & ddbb_file)) > 0 Then
+                    ' *** 2º/A *** DOWNLOAD
+                    ' Download it
+                    copyFileFromNet ddbb_file, DDBB_Athena_file_path_remote & "usr\", DDBB_Athena_local_file_path & "usr\"
+                    
+                    ' *** 2º/B *** APPEND INFO
+                    If i = 0 Then
+                        ' Create tables structure and data
+                        Call DB_UNIFY(DDBB_Athena_local_file_path & "usr\" & ddbb_file, DDBB_Athena_local_file_path & ddbb_file_dest, False, "", verbose)
+                        
+                        ' Drop pk constraint
+                        breakConstraintPK DDBB_Athena_local_file_path & ddbb_file_dest
+                    Else
+                        ' Append info (insert or replace it)
+                        Call DB_HIST_30(DDBB_Athena_local_file_path & ddbb_file_dest, DDBB_Athena_local_file_path & "usr\" & ddbb_file, verbose)
+                    End If
+                    
                 End If
             End If
-        End If
-    Next
-ErrHndlr:
-    getTotalTimeFromToken = total
-    Set jsonDict = Nothing
+        Next
+    End If
+    
+    ' *** 3º *** MANAGE DUPLICATE/NEWEST INFO
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "ALTER TABLE DUTY RENAME TO DUTY1;", verbose)
+    
+    Sql = "CREATE TABLE IF NOT EXISTS DUTY AS " & _
+            " SELECT DISTINCT D.* FROM DUTY1 D INNER JOIN " & _
+            " (SELECT DUTY_COD, MAX(LAST_EVENT_STAMP) as T FROM DUTY1 GROUP BY DUTY_COD) D2 " & _
+            " ON D.DUTY_COD = D2.DUTY_COD AND D.LAST_EVENT_STAMP = D2.T; "
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, Sql, verbose)
+    
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, "DROP TABLE DUTY1;", verbose)
+    
+    ' *** 4º *** APPEND _NET
+    ' Adds all static info
+    Call DB_MERGE(DDBB_Athena_local_file_path & DDBB_Athena_file, DDBB_Athena_local_file_path & ddbb_file_dest, verbose)
+    
+    ' *** 5º *** CLEAN
+    ' Delete all downloaded usr data files locally
+    Call ClearDir(DDBB_Athena_local_file_path & "usr\", "*.db")
+    
+    ' *** 6º *** RETURN
+    dwnloadAllRemoteUsrData = ddbb_file_dest
 End Function
 
-'__________________________ PLANNED TOKEN ________________________
-
-Function getPlannToken(inboxFolder As Outlook.Folder) As Outlook.mailItem
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary
-    Dim objMail As Outlook.mailItem
-    Dim item As Object
-    ' *** Get Plann Stamp ***
-    For Each item In inboxFolder.items
-        If (TypeOf item Is Outlook.mailItem) Then
-            Set objMail = item
-            Exit For
-        End If
-    Next
-    ' *** Get Stamp ***
-    If objMail Is Nothing Then
-        ' *** Prepare Draft ***
-        Set objMail = Outlook.Application.CreateItem(olMailItem).Move(inboxFolder)
-        Set jsonDict = New Dictionary
-        jsonDict.CompareMode = TextCompare
-        objMail.BodyFormat = olFormatRichText
-        objMail.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-        objMail.Save
+Function dwnloadAllRemoteData(Optional dbData As String = "") As String
+    Dim ddbb_files As Variant
+    Dim i As Long
+    Dim Sql As String
+    Dim ddbb_file_dest As String
+    
+    ' Prepare dest file //Delete structure if exists (True) //Copy blank if does not
+    prepareFileData dbData, True
+    
+    ' Check Dept db files
+    Sql = getQueryMailBoxDBFileBelongs
+    ddbb_files = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(ddbb_files) And VariantSize(ddbb_files) > 0 Then
+        For i = 0 To UBound(ddbb_files)
+            If Not IsEmpty(ddbb_files(i)) Then
+                Dim ddbb_file As String
+                Dim ddbb_file_id As String
+                ddbb_file = ddbb_files(i)(0)
+                Call dwnloadRemoteData(ddbb_file, True)
+                ddbb_file_id = Replace(Replace(ddbb_file, ".db", ""), "ATHENA_NET_DATA_", "")
+                
+                Call DB_UNIFY(DDBB_Athena_local_file_path & ddbb_file, DDBB_Athena_local_file_path & ddbb_file_dest, (i = 0), ddbb_file_id, verbose)
+            End If
+        Next
+        dwnloadAllRemoteData = DDBB_Athena_local_file_path & ddbb_file_dest
     End If
-    Set getPlannToken = objMail
-ErrHndlr:
-    Set jsonDict = Nothing
-    Set item = Nothing
-    Set objMail = Nothing
 End Function
 
-Function getPlannTokenField(objMail As Outlook.mailItem, field As String) As String
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary
-    ' *** Read Structure ***
-    If Not objMail Is Nothing Then
-        Set jsonDict = Athena_cJSON.ParseJson(objMail.body)
-        If jsonDict.Exists(field) Then getPlannTokenField = jsonDict(field)
-    End If
-ErrHndlr:
-    Set jsonDict = Nothing
-End Function
-
-Sub setPlannToken(objMail As Outlook.mailItem, isFinished As Boolean, usrName As String, tStamp As String)
-On Error GoTo ErrHndlr
-    Dim jsonDict As Dictionary
-    ' *** Update Structure ***
-    If Not objMail Is Nothing Then
-        Set jsonDict = Athena_cJSON.ParseJson(objMail.body)
-        If Not isFinished Then
-            ' *** Update Init ***
-            If Not jsonDict.Exists(TOKEN_INIT_UPDATE_STAMP) Then jsonDict.Add TOKEN_INIT_UPDATE_STAMP, tStamp
-            jsonDict(TOKEN_INIT_UPDATE_STAMP) = tStamp
-        Else
-            ' *** Update End ***
-            If Not jsonDict.Exists(TOKEN_LAST_UPDATE_STAMP) Then jsonDict.Add TOKEN_LAST_UPDATE_STAMP, tStamp
-            jsonDict(TOKEN_LAST_UPDATE_STAMP) = tStamp
-        End If
-        
-        ' *** Other Fields ***
-        objMail.SentOnBehalfOfName = usrName 'getUserName(getUserLogin)
-        objMail.Subject = "Planificadas_" & tStamp 'Format(Now, Athena_FullTime_Pattern)
-        objMail.BodyFormat = olFormatRichText
-        
-        objMail.body = Athena_cJSON.ConvertToJson(jsonDict, " ")
-        
-        objMail.Save
-    End If
-ErrHndlr:
-    Set jsonDict = Nothing
+Sub doHistorify(ddbb_data_unified As String)
+    ' DwnLoad Last Hist File
+    FileCopy DDBB_Athena_file_path_reporting & DDBB_Athena_file_data_HIST, DDBB_Athena_local_file_path & DDBB_Athena_file_data_HIST
+    
+    ' Historify
+    Call DB_HIST_30(DDBB_Athena_local_file_path & DDBB_Athena_file_data_HIST, ddbb_data_unified, verbose)
 End Sub
 
-Function isPlannTokenRunning(objMail As Outlook.mailItem) As Boolean
-On Error GoTo ErrHndlr
-    Dim tInit As String
-    Dim tEnd As String
-    Dim isRunning As Boolean: isRunning = False
-    ' *** If Token exists ***
-    If Not objMail Is Nothing Then
-        tInit = getPlannTokenField(objMail, TOKEN_INIT_UPDATE_STAMP)
-        tEnd = getPlannTokenField(objMail, TOKEN_LAST_UPDATE_STAMP)
-        ' *** Has value (Both) & Init >= Last ***
-        If tInit <> "" And tInit >= tEnd Then isRunning = True
-    End If
-ErrHndlr:
-    isPlannTokenRunning = isRunning
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+' DATA MODEL - ATHENA - FORM QUERIES
+'??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+'Dado un buzón, devuelve el nombre del fichero de la base de datos que contiene los datos
+Function ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME(mailbox As String) As String
+    ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME = "SELECT DDBB_DATA_FILE FROM MAILBOX LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD WHERE EMAIL = '" & mailbox & "' OR ALIAS_DESC = '" & mailbox & "';"
 End Function
 
-Function getPlannTokenLastTime(objMail As Outlook.mailItem) As String
+Function ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT(mailbox As String, Area_Dept_Cod As String) As String
+    ATHENA_GET_QUERY_GET_AREA_DEPT_DDBB_FILE_NAME_DEPT = "" _
+    & "SELECT 1, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+    & " FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " _
+    & " WHERE (MAILBOX.EMAIL = '" & mailbox & "' ) AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN " & Area_Dept_Cod & " ELSE AREA_DEPT.AREA_DEPT_COD END = " & Area_Dept_Cod _
+    & " union ALL " _
+    & " SELECT 2, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+    & " FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " _
+    & " WHERE (MAILBOX_ALIAS.ALIAS_DESC = '" & mailbox & "') AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN " & Area_Dept_Cod & " ELSE AREA_DEPT.AREA_DEPT_COD END = " & Area_Dept_Cod _
+    & " order by 1"
+End Function
+
+'Dado un buzón, devuelve la lista de sistemas asociados
+Function ATHENA_GET_QUERY_GET_AREA_DEPT(mailbox As String) As String
+    Dim query As String
+    query = "SELECT ad.dept,ad.area_dept_cod FROM MAILBOX_ALIAS ma, mailbox m, AREA_DEPT ad where ma.mailbox_cod = m.mailbox_cod And m.mailbox_cod = ad.mailbox_cod"
+    query = query & " and ma.alias_desc='" & mailbox & "'"
+    ATHENA_GET_QUERY_GET_AREA_DEPT = query
+End Function
+
+'Dado un sistema, devuelve una lista de paises asociados
+Function ATHENA_GET_QUERY_GET_COUNTRY(System As String) As String
+    Dim query As String
+    query = "SELECT DISTINCT U.UNIT, U.UNIT_COD " _
+            & " FROM AREA_UNIT_CATEGORY AUC, UNIT U, AREA_DEPT AD, CATEGORY C " _
+            & " WHERE AD.AREA_DEPT_COD = AUC.AREA_DEPT_COD AND U.UNIT_COD = AUC.UNIT_COD AND C.CAT_COD = AUC.CAT_COD AND AUC.POS_ORDER > -1 "
+    query = query & " AND AD.DEPT='" & System & "'"
+    
+    ATHENA_GET_QUERY_GET_COUNTRY = query
+End Function
+
+'Dado una categoría (CROSS), devuelve una lista de categorias asociadas según matriz reparto
+Function ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS(area_dept_cat_cod As String, Optional isMatrix As Boolean = False) As String
+    Dim query As String: query = "SELECT DISTINCT " _
+        & " UNIT.UNIT AS TRANS_UNIT, " _
+        & " TRANS.AREA_DEPT_CAT_COD AS TRANS_ADC, " _
+        & " MATRIZ_REPARTO.PORCENTAJE AS PRCNT " & vbNewLine _
+        & " FROM " _
+        & " AREA_DEPT_CATEGORY_FULL LEFT JOIN MATRIZ_REPARTO ON AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD = MATRIZ_REPARTO.AREA_DEPT_CAT_COD " & vbNewLine _
+        & " LEFT JOIN UNIT ON MATRIZ_REPARTO.DEST_UNIT_COD = UNIT.UNIT_COD " & vbNewLine _
+        & " LEFT JOIN AREA_UNIT_CATEGORY AS TRANS ON (AREA_DEPT_CATEGORY_FULL.AREA_DEPT_COD = TRANS.AREA_DEPT_COD AND UNIT.UNIT_COD = TRANS.UNIT_COD AND AREA_DEPT_CATEGORY_FULL.CAT_COD = TRANS.CAT_COD) " & vbNewLine _
+        & " WHERE AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD = " & area_dept_cat_cod
+
+    If isMatrix Then query = Replace(query, " UNIT.UNIT AS TRANS_UNIT, ", "")
+    ATHENA_GET_QUERY_GET_CATEGORIES_AND_UNITS_FROM_CROSS = query
+End Function
+
+'Dado un sistema y paises, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORIES_FROM_UNITS_CATEGORY(Area_Dept_Cod As String, units As String, cat As String) As String
+    Dim n As Integer: n = Len(units) - Len(Replace(units, SEP_TOKEN, "")) + 1
+    Dim query As String: query = "SELECT DISTINCT" _
+        & " AREA_DEPT_CATEGORY_FULL.AREA_DEPT_CAT_COD, 1.0/" & n & " " _
+        & " FROM AREA_DEPT_CATEGORY_FULL " _
+        & " WHERE AREA_DEPT_CATEGORY_FULL.AREA_DEPT_COD = " & Area_Dept_Cod & " " _
+        & " AND AREA_DEPT_CATEGORY_FULL.UNIT in ( '" & Replace(units, SEP_TOKEN, "','") & "') " _
+        & " AND AREA_DEPT_CATEGORY_FULL.CAT = '" & cat & "' "
+
+    ATHENA_GET_QUERY_GET_CATEGORIES_FROM_UNITS_CATEGORY = query
+End Function
+
+'Dado un sistema y paises, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS(Area_Dept_Cod As String, units As Variant) As String
+    Dim queryFrom As String
+    Dim subQuery As String
+    Dim i As Integer
+    If VariantSize(units) > 0 Then
+        queryFrom = "SELECT DISTINCT Q1.CAT, Q1.AREA_DEPT_CAT_COD AS Q1ADC " ' , Q2.AREA_DEPT_CAT_COD AS Q2ADC, Q3.AREA_DEPT_CAT_COD AS Q3ADC
+        For i = 0 To UBound(units)
+            If i > 0 Then queryFrom = queryFrom & ", Q" & (i + 1) & ".AREA_DEPT_CAT_COD AS Q" & (i + 1) & "ADC "
+            If i > 0 Then subQuery = subQuery & vbNewLine & " INNER JOIN "
+            subQuery = subQuery & " (SELECT DISTINCT CAT, AREA_DEPT_CAT_COD FROM AREA_DEPT_CATEGORY_FULL WHERE AREA_DEPT_COD = " & Area_Dept_Cod & " AND UNIT = '" & units(i) & "') Q" & (i + 1)
+            If i > 0 Then subQuery = subQuery & " ON (Q" & i & ".CAT = Q" & (i + 1) & ".CAT) "
+        Next
+    End If
+    
+    ATHENA_GET_QUERY_GET_CATEGORY_FROM_UNITS = queryFrom & " FROM " & vbNewLine & subQuery
+End Function
+
+'Dado un sistema y un pais, devuelve una lista de categorias asociadas
+Function ATHENA_GET_QUERY_GET_CATEGORY(System As String, country As String) As String
+    Dim query As String
+    query = "SELECT C.CAT, AUC.AREA_DEPT_CAT_COD " _
+            & " FROM AREA_UNIT_CATEGORY AUC, UNIT U, AREA_DEPT AD, CATEGORY C " _
+            & " WHERE AD.AREA_DEPT_COD = AUC.AREA_DEPT_COD AND U.UNIT_COD = AUC.UNIT_COD AND C.CAT_COD = AUC.CAT_COD AND AUC.POS_ORDER > -1 "
+    query = query & " and ad.dept='" & System & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    query = query & " and u.unit='" & country & "'"  'Insertamos Pais
+    query = query & " order by pos_order"
+    
+    ATHENA_GET_QUERY_GET_CATEGORY = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_PRIORITY() As String
+    ATHENA_GET_QUERY_GET_PRIORITY = "SELECT PRIORITY, PRIORITY_COD FROM DUTY_PRIORITY"
+End Function
+
+Function ATHENA_GET_QUERY_GET_ORIGIN() As String
+    ATHENA_GET_QUERY_GET_ORIGIN = "SELECT ORIGIN, ORIGIN_COD FROM DUTY_ORIGIN"
+End Function
+
+Function ATHENA_GET_QUERY_GET_USER(System As String) As String
+    Dim query As String
+    query = "select user_name, u.user_cod, u.USER_EMPLOYEE from AREA_USER au, user u, role r, AREA_DEPT ad where au.area_dept_cod = ad.area_dept_cod And au.user_cod = u.user_cod And au.role_cod = r.role_cod"
+    query = query & " and ad.dept='" & System & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    
+    ATHENA_GET_QUERY_GET_USER = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USER_BY_COD(System_cod As String) As String
+    Dim query As String
+    query = "select user_name, u.user_cod, u.USER_EMPLOYEE from AREA_USER au, user u, role r, AREA_DEPT ad where au.area_dept_cod = ad.area_dept_cod And au.user_cod = u.user_cod And au.role_cod = r.role_cod"
+    query = query & " and ad.AREA_DEPT_COD='" & System_cod & "'"  'Insertamos Sistema/departamento/Opcion comercial
+    
+    ATHENA_GET_QUERY_GET_USER_BY_COD = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_CANAL() As String
+    ATHENA_GET_QUERY_GET_CANAL = "SELECT CANAL_NAME, CANAL_COD FROM CANAL"
+End Function
+
+Function ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD(user_cod As String) As String
+    Dim query As String
+    query = "select user_employee from user where user_cod='" & user_cod & "'"
+    ATHENA_GET_QUERY_GET_USEREMPLOYEE_BY_USERCOD = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USERCOD_BY_NUM_EMPLOYEE(num_employee As String) As String
+    Dim query As String
+    query = "select user_cod from user where user_employee='" & num_employee & "'"
+    ATHENA_GET_QUERY_GET_USERCOD_BY_NUM_EMPLOYEE = query
+End Function
+
+Function ATHENA_GET_QUERY_GET_USERNAME_BY_NUM_EMPLOYEE(num_employee As String) As String
+    Dim query As String
+    query = "select user_name from user where user_employee='" & num_employee & "'"
+    ATHENA_GET_QUERY_GET_USERNAME_BY_NUM_EMPLOYEE = query
+End Function
+
+
+Function ATHENA_GET_QUERY_GET_CLIENT() As String
+
+   ATHENA_GET_QUERY_GET_CLIENT = "SELECT CLIENT, CLIENT_COD FROM DUTY_CLIENT"
+   
+End Function
+ 
+Function ATHENA_GET_QUERY_GET_CLIENTCOD_BY_CLIENT(client As String) As String
+    Dim query As String
+    query = "select client_cod from duty_client where client='" & client & "'"
+    ATHENA_GET_QUERY_GET_CLIENTCOD_BY_CLIENT = query
+End Function
+
+'' Validate email address
+Public Function IsUserValidInMailBox(ByVal userEmployee As String, ByVal emialMailBox As String, ByVal isAdmin As Boolean, ByVal isSuper As Boolean) As Boolean
 On Error GoTo ErrHndlr
-    Dim tEnd As String: tEnd = "00:00"
-    Dim tDay As String: tDay = Format(Now, Athena_FullDate_Pattern) ' YYYY-MM-DD
-    ' *** If Token exists ***
-    If Not objMail Is Nothing Then
-        tEnd = getPlannTokenField(objMail, TOKEN_LAST_UPDATE_STAMP)
-        ' *** Has value & Today ***
-        If tEnd <> "" Then
-            If tDay = Split(tEnd, " ")(0) Then tEnd = Left(Split(tEnd, " ")(1), 5)
+    Dim infoCod As Variant
+    Dim query As String
+    query = "SELECT DISTINCT mailbox.email, user.user_employee, area_user.role_cod " & _
+            " FROM mailbox inner join area_dept on mailbox.mailbox_cod = area_dept.mailbox_cod " & _
+            " inner join area_user on area_dept.area_dept_cod = area_user.area_dept_cod " & _
+            " inner join user on area_user.user_cod = user.user_cod" & _
+            " WHERE user.user_employee='" & userEmployee & "' and mailbox.email='" & emialMailBox & "' AND "
+    If isAdmin = isSuper Then
+        If Not isAdmin Then query = query & " NOT "
+        query = query & " area_user.role_cod in (" & Athena_Role_AdminCod & "," & Athena_Role_SuperCod & ")"
+    Else
+        If isAdmin Then
+            query = query & " area_user.role_cod in (" & Athena_Role_AdminCod & ")"
+        Else
+            query = query & " area_user.role_cod in (" & Athena_Role_SuperCod & ")"
         End If
     End If
+    infoCod = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, query, verbose)
+    If Not IsEmpty(infoCod) And VariantSize(infoCod) > 0 Then
+        IsUserValidInMailBox = (infoCod(0)(0) <> "")
+    End If
 ErrHndlr:
-    If Len(tEnd) <> 5 Then tEnd = "00:00"
-    getPlannTokenLastTime = tEnd
 End Function
+
+Function ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_DUTY_COD(duty_cod As String) As String
+    ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_DUTY_COD = "SELECT DISTINCT TOKEN_ENTRY_ID FROM DUTY WHERE DUTY_COD = '" & duty_cod & "';"
+End Function
+
+Function ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_USER_AND_STATUS(user_cod As Long, stat_cod As Long) As String
+    ATHENA_GET_QUERY_TOKEN_ENTRYID_BY_USER_AND_STATUS = "SELECT DISTINCT TOKEN_ENTRY_ID FROM DUTY WHERE OWNER_COD=" & user_cod & " AND STATUS_COD=" & stat_cod & ""
+End Function
+
+Function ATHENA_GET_PLANNED_EXECUTED() As String
+    ATHENA_GET_PLANNED_EXECUTED = "SELECT DISTINCT AREA_DEPT_CAT_COD || '.' || `DESC` FROM DUTY_PLANNED_EXECUTED WHERE MARK_DAY = strftime ('%Y%m%d', date('now','localtime'));"
+End Function
+
+Function ATHENA_GET_DBS_FROM_MAILBOX(dir_buzon As String) As String
+    ATHENA_GET_DBS_FROM_MAILBOX = "SELECT DISTINCT CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " _
+        & " FROM MAILBOX LEFT JOIN MAILBOX_ALIAS on MAILBOX.mailbox_cod = MAILBOX_ALIAS.mailbox_cod inner join AREA_DEPT on MAILBOX.mailbox_cod = AREA_DEPT.mailbox_cod " _
+        & " WHERE MAILBOX.email = '" & dir_buzon & "' OR MAILBOX_ALIAS.alias_desc = '" & dir_buzon & "'"
+End Function
+
+Function ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS(alias_buzon As String) As String
+    ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS = "SELECT DISTINCT MAILBOX.EMAIL " _
+        & " FROM MAILBOX LEFT JOIN MAILBOX_ALIAS on MAILBOX.mailbox_cod = MAILBOX_ALIAS.mailbox_cod " _
+        & " WHERE MAILBOX_ALIAS.alias_desc = '" & alias_buzon & "'"
+End Function
+
+Function ATHENA_GET_PLANNED_DUTIES(mail_box As String, launched_tasks As String) As String
+    ATHENA_GET_PLANNED_DUTIES = "SELECT DISTINCT " & _
+                                " AREA_DEPT.AREA_DEPT_COD " & _
+                                " , AREA_UNIT_CATEGORY.UNIT_COD " & _
+                                " , AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " , AREA_DEPT.DEPT " & _
+                                " , UNIT.UNIT " & _
+                                " , CATEGORY.CAT " & _
+                                " , DUTY_PLANNED.DESC " & _
+                                " , CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " & _
+                                " , COALESCE(DUTY_PLANNED.DETAIL, '') " & _
+                                " FROM DUTY_PLANNED " & _
+                                " INNER JOIN AREA_UNIT_CATEGORY ON DUTY_PLANNED.AREA_DEPT_CAT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_DEPT.AREA_DEPT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_COD " & _
+                                " INNER JOIN CATEGORY ON AREA_UNIT_CATEGORY.CAT_COD = CATEGORY.CAT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " & _
+                                " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " & _
+                                " INNER JOIN PLANN ON DUTY_PLANNED.PLANN_COD = PLANN.PLANN_COD " & _
+                                " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & mail_box & "' AND PLANN.PLANN_D = DATE('now', 'localtime')" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') <= strftime('%H:%M', datetime('now', 'localtime'))" & _
+                                " AND length(REPLACE( ',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',', ',' || PLANN.PLANN_CONDITION || ',', '')) < length(',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',') " & _
+                                " AND AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD || '.' || DUTY_PLANNED.DESC not in (" & launched_tasks & ")" & _
+                                " ORDER BY 8,7,4,5,3;"
+
+End Function
+
+Function ATHENA_GET_PLANNED_DUTIES_3_0(mail_box As String, last_time As String, now_time As String) As String
+    ATHENA_GET_PLANNED_DUTIES_3_0 = "SELECT DISTINCT " & _
+                                " AREA_DEPT.AREA_DEPT_COD " & _
+                                " , AREA_UNIT_CATEGORY.UNIT_COD " & _
+                                " , AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " , AREA_DEPT.DEPT " & _
+                                " , UNIT.UNIT " & _
+                                " , CATEGORY.CAT " & _
+                                " , DUTY_PLANNED.DESC " & _
+                                " , CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE " & _
+                                " , COALESCE(DUTY_PLANNED.DETAIL, '') " & _
+                                " , IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') AS T_SCHEDULLE " & _
+                                " FROM DUTY_PLANNED " & _
+                                " INNER JOIN AREA_UNIT_CATEGORY ON DUTY_PLANNED.AREA_DEPT_CAT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD " & _
+                                " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " & _
+                                " INNER JOIN AREA_DEPT ON AREA_DEPT.AREA_DEPT_COD = AREA_UNIT_CATEGORY.AREA_DEPT_COD " & _
+                                " INNER JOIN CATEGORY ON AREA_UNIT_CATEGORY.CAT_COD = CATEGORY.CAT_COD " & _
+                                " INNER JOIN MAILBOX_ALIAS ON AREA_DEPT.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD " & _
+                                " INNER JOIN MAILBOX ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD " & _
+                                " INNER JOIN PLANN ON DUTY_PLANNED.PLANN_COD = PLANN.PLANN_COD " & _
+                                " WHERE MAILBOX_ALIAS.ALIAS_DESC = '" & mail_box & "' AND PLANN.PLANN_D = DATE('now', 'localtime')" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') <= '" & now_time & "'" & _
+                                " AND IFNULL(DUTY_PLANNED.TIME_SCHEDULE, '00:00') > '" & last_time & "'" & _
+                                " AND length(REPLACE( ',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',', ',' || PLANN.PLANN_CONDITION || ',', '')) < length(',' || IFNULL(DUTY_PLANNED.PLANN_CONDITION, PLANN.PLANN_CONDITION) || ',') " & _
+                                " ORDER BY 8, 10, 7,4,5,3;"
+
+End Function
+
+Function ATHENA_GET_PLANNED_DUTY_IDS(origin_cod As String, status_cod As String, t_stamp As String) As String
+    ATHENA_GET_PLANNED_DUTY_IDS = "SELECT DUTY_COD, TOKEN_ENTRY_ID, CAT_AREA_UNIT_COD, ORIGIN_COD, NAME, OWNER_COD FROM DUTY " & _
+                                    " WHERE ORIGIN_COD = " & origin_cod & _
+                                    " AND STATUS_COD = " & status_cod & _
+                                    " AND LAST_EVENT_STAMP = '" & t_stamp & "';"
+End Function
+
+Function ATHENA_GET_QUERY_UPD_DUTY(idDuty As String, area_dept_cat_cod As String, volume As String) As String
+    Dim updSQLTask As String
+    updSQLTask = "UPDATE DUTY SET `WHEN` = '" & Format(Now, Athena_FullTime_Pattern) & "' , who='" & getUserLogin & "' "
+    If area_dept_cat_cod <> "" Then updSQLTask = updSQLTask + ", cat_area_unit_cod = " & area_dept_cat_cod
+    If volume <> "" Then updSQLTask = updSQLTask + ", volume = " & volume
+    updSQLTask = updSQLTask & " WHERE DUTY_COD = '" & idDuty & "'"
+    ATHENA_GET_QUERY_UPD_DUTY = updSQLTask
+End Function
+
+Function ATHENA_GET_QUERY_INS_DUTY(EntryId As String, name As String, status_cod As Integer, cat_area_unit_cod As String, origin_cod As String, owner_cod As String, prior_cod As String, pk As String, volume As String, client As String, inc_op As String, notes As String) As String
+    ' New Task
+    Dim insSQLTask As String
+    insSQLTask = "INSERT INTO DUTY (TOKEN_ENTRY_ID, NAME, STATUS_COD, CAT_AREA_UNIT_COD, ORIGIN_COD, OWNER_COD, PRIOR_COD, LAST_EVENT_STAMP, PK, VOLUME, WHO, `WHEN`, CLIENT, IS_INC, VOLUMEN_ERR, COMENTARIOS) VALUES ('" & _
+     EntryId & "','" & clearString(name) & "', " & status_cod & ", " & cat_area_unit_cod & ", " & origin_cod & ", " & owner_cod & ", " & prior_cod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & pk & "', '" & volume & "', '" & getUserLogin & "', '" & Format(Now, Athena_FullTime_Pattern) & "','" & client & "', " & inc_op & "',null, '" & notes & "' "
+    ATHENA_GET_QUERY_INS_DUTY = insSQLTask
+End Function
+
+Function ATHENA_GET_QUERY_INS_PROJECT(user As String, project As String, comments_project As String, start_time As String, end_time As String) As String
+    ' New Task
+    Dim insSQLTask As String
+    insSQLTask = "INSERT INTO PROJECT (USER, PROJECT, START_TIME, END_TIME, COMMENTS) VALUES ('" & _
+     user & "','" & project & "', " & comments_project & "," & start_time & ", " & end_time & "' "
+    ATHENA_GET_QUERY_INS_PROJECT = insSQLTask
+End Function
+
+Function ATHENA_GET_QUERIES_INS_UPD_DUTY_EVENTS(idDuty As String, entry_id As String, event_time As String, area_dept_cat_cod As String, volumen As String) As String
+    Dim updSQLEvent As String
+    updSQLEvent = " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) "
+    If volumen <> "" Then updSQLEvent = updSQLEvent & " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(event_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', " & volumen & ", null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' "
+    If volumen <> "" And area_dept_cat_cod <> "" Then updSQLEvent = updSQLEvent & " UNION ALL "
+    If area_dept_cat_cod <> "" Then updSQLEvent = updSQLEvent & " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(event_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', " & area_dept_cat_cod & ", null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' "
+
+    ATHENA_GET_QUERIES_INS_UPD_DUTY_EVENTS = updSQLEvent
+End Function
+
+Function ATHENA_GET_QUERIES_INS_NEW_DUTY(idDuty As String, conversation_id As String, entry_id As String, duty_status As Integer, mail_stamp As String, creation_time As String, owner As String, Optional volumen As String = "", Optional area_dept_cat_cod As String = "", Optional t_end As String = "") As String
+    Dim insSQLEvent As String
+    ' New Request
+    insSQLEvent = "INSERT INTO REQUEST (DUTY_COD, CONVERSATION_ID) VALUES ( '" & idDuty & "', '" & conversation_id & "'); "
+    
+    ' TODO: Dejará de aplicar una vez aplicado los Triggers
+    ' Duty Events (Reduce 6 event trace to 1 Insert select)
+    '   Trace - Income mail
+    If duty_status = Athena_Mail_StatusCod_End And t_end <> "" Then 'Es ajuste de tiempo
+        insSQLEvent = insSQLEvent & vbNewLine & " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) " & _
+                                " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(mail_stamp, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'MAIL', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'TOKEN', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'DUTY', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & area_dept_cat_cod & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & volumen & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & Athena_Mail_StatusCod_Started & "', '1', null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_OwnershipCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & owner & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(t_end, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & Athena_Mail_StatusCod_End & "', '1', null, '" & Format(Now, Athena_FullTime_Pattern) & "';"
+    Else
+        insSQLEvent = insSQLEvent & vbNewLine & " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, IS_ADJ, IGNORE, WHEN_STAMP) " & _
+                                " SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(mail_stamp, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'MAIL', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(creation_time, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'TOKEN', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_TraceCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', 'DUTY', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ClassifiedCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & area_dept_cat_cod & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_VolumeCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & volumen & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_ActivityCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & duty_status & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "' " _
+                    & " UNION ALL SELECT '" & entry_id & "', '" & idDuty & "', " & Athena_Event_OwnershipCod & ", '" & Format(Now, Athena_FullTime_Pattern) & "', '" & getUserLogin & "', '" & owner & "', null, null, '" & Format(Now, Athena_FullTime_Pattern) & "';"
+    End If
+        
+    ' Remove PRE_TASK
+    insSQLEvent = insSQLEvent & vbNewLine & " DELETE FROM PRE_TASK WHERE CONVERSATION_ID = '" & conversation_id & "';"
+    
+    ATHENA_GET_QUERIES_INS_NEW_DUTY = insSQLEvent
+End Function
+
+' TODO: Dejará de aplicar una vez aplicado los Triggers
+Function ATHENA_GET_QUERIES_INS_NEW_DUTY_EVENT_PLANNED(origin_cod As String, duty_status_cod As String, t_stamp As String, owner_cod As String) As String
+    Dim insSQLEvent As String
+    
+    ' Duty Events (Reduce 6 event trace to 1 Insert select)
+    '   Trace - Income mail
+    insSQLEvent = " INSERT INTO DUTY_EVENT (ENTRY_ID, DUTY_COD, EVENT_COD, EVENT_STAMP, WHO_ID, VALUE, WHEN_STAMP) " & _
+    " SELECT DUTY.TOKEN_ENTRY_ID, DUTY.DUTY_COD, DUMMY_EVENT_NEW_DUTY.EVENT_CODE " & _
+        " , '" & t_stamp & "' " & _
+        " , '" & getUserLogin & "' " & _
+        " ,  CASE WHEN EVENT_CODE = " & Athena_Event_TraceCod & " THEN VALUE " & _
+            " WHEN EVENT_CODE = " & Athena_Event_VolumeCod & " THEN 0 " & _
+            " WHEN EVENT_CODE = " & Athena_Event_ActivityCod & " THEN " & duty_status_cod & " " & _
+            " WHEN EVENT_CODE = " & Athena_Event_OwnershipCod & " THEN " & owner_cod & " " & _
+            " ELSE 0 END " & _
+        " , '" & Format(Now, Athena_FullTime_Pattern) & "' " & _
+    " FROM DUTY, DUMMY_EVENT_NEW_DUTY " & _
+                                    " WHERE ORIGIN_COD = " & origin_cod & _
+                                    " AND STATUS_COD = " & duty_status_cod & _
+                                    " AND LAST_EVENT_STAMP = '" & t_stamp & "';"
+    
+    ATHENA_GET_QUERIES_INS_NEW_DUTY_EVENT_PLANNED = insSQLEvent
+End Function
+
+Function Athena_Get_AreaDeptCod_From_Token(areaDept As String, unit As String, category As String) As String
+On Error Resume Next
+    ' Puede que no esté definido el buzón por lo que se devolverá el genérico "ATHENA_NET_DATA.db"
+    Athena_Get_AreaDeptCod_From_Token = ""
+    Dim infoCod As Variant
+    Dim Sql As String
+    Sql = "SELECT AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD FROM " _
+            & " CATEGORY INNER JOIN AREA_UNIT_CATEGORY ON CATEGORY.CAT_COD = AREA_UNIT_CATEGORY.CAT_COD " _
+            & " INNER JOIN AREA_DEPT ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+            & " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " _
+            & " WHERE cat = '" & category & "' And DEPT = '" & areaDept & "' And unit = '" & unit & "'"
+
+    infoCod = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+    If Not IsEmpty(infoCod) And VariantSize(infoCod) > 0 Then
+        Athena_Get_AreaDeptCod_From_Token = infoCod(0)(0)
+    End If
+End Function
+
+Function Athena_Get_All_AreaDeptCod_From_Token(areaDept As String, unit As String, category As String) As Variant
+On Error Resume Next
+    Dim Sql As String: Sql = "SELECT AREA_UNIT_CATEGORY.AREA_DEPT_CAT_COD, AREA_UNIT_CATEGORY.AREA_DEPT_COD, AREA_UNIT_CATEGORY.UNIT_COD, AREA_UNIT_CATEGORY.CAT_COD " _
+            & " FROM " _
+            & " CATEGORY INNER JOIN AREA_UNIT_CATEGORY ON CATEGORY.CAT_COD = AREA_UNIT_CATEGORY.CAT_COD " _
+            & " INNER JOIN AREA_DEPT ON AREA_UNIT_CATEGORY.AREA_DEPT_COD = AREA_DEPT.AREA_DEPT_COD " _
+            & " INNER JOIN UNIT ON AREA_UNIT_CATEGORY.UNIT_COD = UNIT.UNIT_COD " _
+            & " WHERE cat = '" & category & "' And DEPT = '" & areaDept & "' And unit = '" & unit & "'"
+
+    Athena_Get_All_AreaDeptCod_From_Token = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, Sql, verbose)
+End Function
+
+Public Function Athena_Get_ViewXML_MailBox(mailbox As String) As String
+    Dim selMailBoxXML As String: selMailBoxXML = "SELECT VIEW_XML FROM MAILBOX WHERE MAILBOX='" & mailbox & "'"
+    Dim xmls As Variant: xmls = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, selMailBoxXML, verbose)
+    If Not IsEmpty(xmls) And VariantSize(xmls) > 0 Then
+        Athena_Get_ViewXML_MailBox = xmls(0)(0)
+    End If
+End Function
+
+Public Function Athena_Get_MailBoxEmail() As String
+On Error Resume Next
+    Dim mailbox As String
+    Dim emails As Variant: emails = DB_DQL(DDBB_Athena_local_file_path & DDBB_Athena_file, ATHENA_GET_EMAIL_FROM_MAILBOX_ALIAS(getMailBox()), verbose)
+    If Not IsEmpty(emails) And VariantSize(emails) > 0 Then
+        mailbox = emails(0)(0)
+    End If
+    Athena_Get_MailBoxEmail = mailbox
+End Function
+
+Public Function Athena_Get_MailBoxXMLPath(Optional email As String = "", Optional localPath As Boolean = True) As String
+    Dim mailboxXMLPath As String
+    
+    If localPath Then
+        mailboxXMLPath = DDBB_Athena_local_file_path & "..\views\" '& email & ".xml"
+    Else
+        mailboxXMLPath = DDBB_Athena_file_path_remote & "..\views\" '& email & ".xml"
+    End If
+    If email <> "" Then mailboxXMLPath = mailboxXMLPath & email
+    Athena_Get_MailBoxXMLPath = mailboxXMLPath
+End Function
+
+
+
