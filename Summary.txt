@@ -1,12 +1,1 @@
-Private Sub CategoriaListBox_Click()
-    If CategoriaListBox.ListIndex > -1 Then
-        ' Guarda el texto visible como nombre de la categoría
-        GLOBAL_CATEGORY = CategoriaListBox.Value
-        
-        ' Guarda el código de categoría, si viene desde la consulta
-        ' Supone que athena_category_list tiene la forma: (CAT_COD, CAT)
-        If Not IsEmpty(athena_category_list) Then
-            GLOBAL_CATEGORY_COD = athena_category_list(CategoriaListBox.ListIndex)(0)
-        End If
-    End If
-End Sub
+SELECT 1, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE  FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD  WHERE (MAILBOX.EMAIL = 'nazly.garcia@servexternos.gruposantander.com' ) AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN -1 ELSE AREA_DEPT.AREA_DEPT_COD END = -1 union ALL  SELECT 2, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE  FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD  WHERE (MAILBOX_ALIAS.ALIAS_DESC = 'nazly.garcia@servexternos.gruposantander.com') AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN -1 ELSE AREA_DEPT.AREA_DEPT_COD END = -1 order by 1
