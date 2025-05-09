@@ -1,1 +1,18 @@
 SELECT 1, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE  FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD  WHERE (MAILBOX.EMAIL = 'nazly.garcia@servexternos.gruposantander.com' ) AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN -1 ELSE AREA_DEPT.AREA_DEPT_COD END = -1 union ALL  SELECT 2, CASE WHEN AREA_DEPT.DDBB_DATA_FILE IS NULL THEN MAILBOX.DDBB_DATA_FILE ELSE AREA_DEPT.DDBB_DATA_FILE END AS DB_FILE  FROM MAILBOX LEFT JOIN AREA_DEPT ON AREA_DEPT.MAILBOX_COD = MAILBOX.MAILBOX_COD LEFT JOIN MAILBOX_ALIAS ON MAILBOX.MAILBOX_COD = MAILBOX_ALIAS.MAILBOX_COD  WHERE (MAILBOX_ALIAS.ALIAS_DESC = 'nazly.garcia@servexternos.gruposantander.com') AND CASE WHEN AREA_DEPT.AREA_DEPT_COD IS NULL THEN -1 ELSE AREA_DEPT.AREA_DEPT_COD END = -1 order by 1
+
+
+Asunto: Error en ejecución del proceso – Problema con base de datos SQLite
+
+Hola Miriam,
+
+He ejecutado el proceso completo y se ha producido el error: Error opening database: 1.
+
+Tras analizarlo, he localizado el origen en el módulo Athena_cSqlite, concretamente en una validación de RetVal <> 0. Las primeras cinco iteraciones devuelven 0, pero en la sexta (una consulta más compleja), el valor es 1, lo que provoca el fallo.
+
+Depurando, observé que la consulta SQL no se podía ejecutar porque faltaba la columna DDBB_DATA_FILE en la tabla AREA_DEPT. Añadí manualmente dicha columna. Aunque la consulta ya se ejecuta (sin devolver resultados), el proceso seguía fallando en validación.
+
+Probé entonces a insertar un registro en la tabla MAILBOX con mis datos. Esto generó un nuevo error, esta vez indicando que falta instalar un componente (adjunto captura). Tras instalar el archivo indicado, el error persiste. Empiezo a sospechar que puede deberse a una configuración incorrecta en el entorno o a requisitos mal definidos en la instalación.
+
+Quedo pendiente de tus indicaciones para seguir avanzando.
+
+Un saludo,
