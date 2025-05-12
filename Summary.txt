@@ -1,5 +1,36 @@
-    Sql = "CREATE TABLE IF NOT EXISTS DUTY AS " & _
-            " SELECT DISTINCT D.* FROM DUTY1 D INNER JOIN " & _
-            " (SELECT DUTY_COD, MAX(LAST_EVENT_STAMP) as T FROM DUTY1 GROUP BY DUTY_COD) D2 " & _
-            " ON D.DUTY_COD = D2.DUTY_COD AND D.LAST_EVENT_STAMP = D2.T; "
-    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, Sql, verbose)
+Sub ValidarTablaDUTY_CLIENT()
+    Dim pathHist As String
+    Dim pathBAU As String
+    Dim sqlCheck As String
+    Dim resultadoHist As Variant
+    Dim resultadoBAU As Variant
+
+    pathHist = DDBB_Athena_local_file_path & "ATHENA_NET_DATA_HIST.db"
+    pathBAU = DDBB_Athena_local_file_path & "ATHENA_NET_DATA_BAU.db"
+    sqlCheck = "SELECT CLIENT, CLIENT_COD FROM DUTY_CLIENT LIMIT 10"
+
+    On Error Resume Next
+
+    ' Validación en ATHENA_NET_DATA_HIST
+    resultadoHist = DB_DQL(pathHist, sqlCheck, True)
+    If Err.Number <> 0 Then
+        MsgBox "Error al acceder a ATHENA_NET_DATA_HIST.db: " & Err.Description, vbCritical
+        Err.Clear
+    ElseIf IsEmpty(resultadoHist) Then
+        MsgBox "La tabla DUTY_CLIENT no existe o está vacía en ATHENA_NET_DATA_HIST.db", vbExclamation
+    Else
+        MsgBox "DUTY_CLIENT válida en ATHENA_NET_DATA_HIST.db con " & UBound(resultadoHist) + 1 & " registros.", vbInformation
+    End If
+
+    ' Validación en ATHENA_NET_DATA_BAU
+    resultadoBAU = DB_DQL(pathBAU, sqlCheck, True)
+    If Err.Number <> 0 Then
+        MsgBox "Error al acceder a ATHENA_NET_DATA_BAU.db: " & Err.Description, vbCritical
+        Err.Clear
+    ElseIf IsEmpty(resultadoBAU) Then
+        MsgBox "La tabla DUTY_CLIENT no existe o está vacía en ATHENA_NET_DATA_BAU.db", vbExclamation
+    Else
+        MsgBox "DUTY_CLIENT válida en ATHENA_NET_DATA_BAU.db con " & UBound(resultadoBAU) + 1 & " registros.", vbInformation
+    End If
+End Sub
+
