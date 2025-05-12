@@ -1,25 +1,5 @@
-Sub RecuentoTablasATHENA_HIST()
-    Dim pathHIST As String: pathHIST = "C:\DATOS\ATHENA_TASKMANAGER\db\ATHENA_NET_DATA_HIST.db"
-    Dim tablas As Variant
-    Dim resultado As Variant
-    Dim i As Integer
-    Dim resumen As String
-
-    tablas = Array("DUTY", "DUTY_EVENT", "PRE_TASK", "DUTY_PLANNED_EXECUTED", "TOKEN_HISTORY")
-    resumen = "Recuento de registros en ATHENA_HIST:" & vbNewLine
-
-    For i = 0 To UBound(tablas)
-        On Error Resume Next
-        resultado = DB_DQL(pathHIST, "SELECT COUNT(*) FROM " & tablas(i), False)
-        If Err.Number <> 0 Then
-            resumen = resumen & tablas(i) & ": ERROR (" & Err.Description & ")" & vbNewLine
-            Err.Clear
-        ElseIf Not IsEmpty(resultado) Then
-            resumen = resumen & tablas(i) & ": " & resultado(0)(0) & " registros" & vbNewLine
-        Else
-            resumen = resumen & tablas(i) & ": VACÍA o no accesible" & vbNewLine
-        End If
-    Next i
-
-    MsgBox resumen, vbInformation, "Resumen ATHENA_HIST"
-End Sub
+    Sql = "CREATE TABLE IF NOT EXISTS DUTY AS " & _
+            " SELECT DISTINCT D.* FROM DUTY1 D INNER JOIN " & _
+            " (SELECT DUTY_COD, MAX(LAST_EVENT_STAMP) as T FROM DUTY1 GROUP BY DUTY_COD) D2 " & _
+            " ON D.DUTY_COD = D2.DUTY_COD AND D.LAST_EVENT_STAMP = D2.T; "
+    Call DB_DDL(DDBB_Athena_local_file_path & ddbb_file_dest, Sql, verbose)
