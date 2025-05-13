@@ -1,36 +1,4 @@
-Sub ValidarTablaDUTY_CLIENT()
-    Dim pathHist As String
-    Dim pathBAU As String
-    Dim sqlCheck As String
-    Dim resultadoHist As Variant
-    Dim resultadoBAU As Variant
-
-    pathHist = DDBB_Athena_local_file_path & "ATHENA_NET_DATA_HIST.db"
-    pathBAU = DDBB_Athena_local_file_path & "ATHENA_NET_DATA_BAU.db"
-    sqlCheck = "SELECT CLIENT, CLIENT_COD FROM DUTY_CLIENT LIMIT 10"
-
-    On Error Resume Next
-
-    ' Validación en ATHENA_NET_DATA_HIST
-    resultadoHist = DB_DQL(pathHist, sqlCheck, True)
-    If Err.Number <> 0 Then
-        MsgBox "Error al acceder a ATHENA_NET_DATA_HIST.db: " & Err.Description, vbCritical
-        Err.Clear
-    ElseIf IsEmpty(resultadoHist) Then
-        MsgBox "La tabla DUTY_CLIENT no existe o está vacía en ATHENA_NET_DATA_HIST.db", vbExclamation
-    Else
-        MsgBox "DUTY_CLIENT válida en ATHENA_NET_DATA_HIST.db con " & UBound(resultadoHist) + 1 & " registros.", vbInformation
-    End If
-
-    ' Validación en ATHENA_NET_DATA_BAU
-    resultadoBAU = DB_DQL(pathBAU, sqlCheck, True)
-    If Err.Number <> 0 Then
-        MsgBox "Error al acceder a ATHENA_NET_DATA_BAU.db: " & Err.Description, vbCritical
-        Err.Clear
-    ElseIf IsEmpty(resultadoBAU) Then
-        MsgBox "La tabla DUTY_CLIENT no existe o está vacía en ATHENA_NET_DATA_BAU.db", vbExclamation
-    Else
-        MsgBox "DUTY_CLIENT válida en ATHENA_NET_DATA_BAU.db con " & UBound(resultadoBAU) + 1 & " registros.", vbInformation
-    End If
-End Sub
-
+If Dir(RutaLibAthena + "x64\sqlite3.dll") = "" Then
+    MsgBox "Falta el archivo sqlite3.dll en la ruta esperada: " & RutaLibAthena & "x64\", vbCritical
+    Exit Sub
+End If
