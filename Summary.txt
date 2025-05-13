@@ -1,13 +1,48 @@
-Sub VerificarRutaSqliteDLL()
-    Dim rutaBase As String
-    Dim rutaFinal As String
+Sub MostrarBasesDeDatosAthena()
+
+    Dim fso As Object
+    Dim carpetaDB As String
+    Dim archivo As Object
+    Dim lista As String
     
-    ' Base utilizada en Athena: DDBB_Athena_local_file_path & "..\lib\"
-    rutaBase = "C:\DATOS\ATHENA_TASKMANAGER\db\"
-    rutaFinal = rutaBase & "..\lib\x64\sqlite3.dll"
+    ' Ruta base (puedes ajustarla si está en otra ubicación)
+    carpetaDB = "C:\DATOS\ATHENA_TASKMANAGER\db\"
     
-    ' Normalizar la ruta eliminando ".."
-    rutaFinal = CreateObject("Scripting.FileSystemObject").GetAbsolutePathName(rutaFinal)
+    ' Crear objeto FileSystem
+    Set fso = CreateObject("Scripting.FileSystemObject")
     
-    MsgBox "La ruta completa esperada para sqlite3.dll es:" & vbCrLf & vbCrLf & rutaFinal, vbInformation, "Ruta esperada"
+    ' Verificar si la carpeta existe
+    If Not fso.FolderExists(carpetaDB) Then
+        MsgBox "La carpeta no existe: " & carpetaDB, vbCritical
+        Exit Sub
+    End If
+    
+    ' Recorrer archivos .db
+    For Each archivo In fso.GetFolder(carpetaDB).Files
+        If LCase(fso.GetExtensionName(archivo.Name)) = "db" Then
+            lista = lista & archivo.Name & vbTab & "--> "
+            
+            Select Case True
+                Case InStr(archivo.Name, "ATHENA_NET.db") > 0
+                    lista = lista & "Base principal de configuración y metadatos" & vbCrLf
+                Case InStr(archivo.Name, "ATHENA_NET_DATA_HIST") > 0
+                    lista = lista & "Base de datos histórica (archivos antiguos o cerrados)" & vbCrLf
+                Case InStr(archivo.Name, "ATHENA_NET_DATA_BAU") > 0
+                    lista = lista & "Base BAU - tareas de operación continua" & vbCrLf
+                Case InStr(archivo.Name, "ATHENA_NET_DATA_EMPTY") > 0
+                    lista = lista & "Plantilla vacía para generar nuevas bases de datos" & vbCrLf
+                Case InStr(archivo.Name, "ATHENA_NET_DATA_") > 0
+                    lista = lista & "Base de datos de usuario o unidad específica" & vbCrLf
+                Case Else
+                    lista = lista & "Base desconocida o personalizada" & vbCrLf
+            End Select
+        End If
+    Next
+    
+    If lista = "" Then
+        lista = "No se encontraron archivos .db en " & carpetaDB
+    End If
+    
+    MsgBox lista, vbInformation, "Bases de Datos ATHENA encontradas"
+
 End Sub
