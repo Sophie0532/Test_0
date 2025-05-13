@@ -1,4 +1,13 @@
-If Dir(RutaLibAthena + "x64\sqlite3.dll") = "" Then
-    MsgBox "Falta el archivo sqlite3.dll en la ruta esperada: " & RutaLibAthena & "x64\", vbCritical
-    Exit Sub
-End If
+Sub VerificarRutaSqliteDLL()
+    Dim rutaBase As String
+    Dim rutaFinal As String
+    
+    ' Base utilizada en Athena: DDBB_Athena_local_file_path & "..\lib\"
+    rutaBase = "C:\DATOS\ATHENA_TASKMANAGER\db\"
+    rutaFinal = rutaBase & "..\lib\x64\sqlite3.dll"
+    
+    ' Normalizar la ruta eliminando ".."
+    rutaFinal = CreateObject("Scripting.FileSystemObject").GetAbsolutePathName(rutaFinal)
+    
+    MsgBox "La ruta completa esperada para sqlite3.dll es:" & vbCrLf & vbCrLf & rutaFinal, vbInformation, "Ruta esperada"
+End Sub
