@@ -1,48 +1,53 @@
-Sub MostrarBasesDeDatosAthena()
+Sub AnalizarBasesDatosAthena()
 
-    Dim fso As Object
-    Dim carpetaDB As String
-    Dim archivo As Object
-    Dim lista As String
+    Dim fso As Object, dbFolder As String, file As Object
+    Dim dbPath As String, resultado As String
+    Dim tablas() As String
+    Dim i As Integer
+    Dim conn As Object, rs As Object, sql As String
     
-    ' Ruta base (puedes ajustarla si está en otra ubicación)
-    carpetaDB = "C:\DATOS\ATHENA_TASKMANAGER\db\"
+    ' Ruta base de bases de datos
+    dbFolder = "C:\DATOS\ATHENA_TASKMANAGER\db\"
     
-    ' Crear objeto FileSystem
     Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    ' Verificar si la carpeta existe
-    If Not fso.FolderExists(carpetaDB) Then
-        MsgBox "La carpeta no existe: " & carpetaDB, vbCritical
+    If Not fso.FolderExists(dbFolder) Then
+        MsgBox "Ruta no encontrada: " & dbFolder, vbCritical
         Exit Sub
     End If
     
-    ' Recorrer archivos .db
-    For Each archivo In fso.GetFolder(carpetaDB).Files
-        If LCase(fso.GetExtensionName(archivo.Name)) = "db" Then
-            lista = lista & archivo.Name & vbTab & "--> "
+    resultado = ""
+    
+    For Each file In fso.GetFolder(dbFolder).Files
+        If LCase(fso.GetExtensionName(file.Name)) = "db" Then
+            dbPath = file.Path
+            resultado = resultado & vbCrLf & "📁 " & file.Name & vbCrLf
             
-            Select Case True
-                Case InStr(archivo.Name, "ATHENA_NET.db") > 0
-                    lista = lista & "Base principal de configuración y metadatos" & vbCrLf
-                Case InStr(archivo.Name, "ATHENA_NET_DATA_HIST") > 0
-                    lista = lista & "Base de datos histórica (archivos antiguos o cerrados)" & vbCrLf
-                Case InStr(archivo.Name, "ATHENA_NET_DATA_BAU") > 0
-                    lista = lista & "Base BAU - tareas de operación continua" & vbCrLf
-                Case InStr(archivo.Name, "ATHENA_NET_DATA_EMPTY") > 0
-                    lista = lista & "Plantilla vacía para generar nuevas bases de datos" & vbCrLf
-                Case InStr(archivo.Name, "ATHENA_NET_DATA_") > 0
-                    lista = lista & "Base de datos de usuario o unidad específica" & vbCrLf
-                Case Else
-                    lista = lista & "Base desconocida o personalizada" & vbCrLf
-            End Select
+            ' Abrir conexión a SQLite usando ADODB
+            On Error Resume Next
+            Set conn = CreateObject("ADODB.Connection")
+            conn.Open "Driver={SQLite3 ODBC Driver};Database=" & dbPath
+            If Err.Number <> 0 Then
+                resultado = resultado & "   ❌ No se pudo abrir (falta controlador o archivo corrupto)" & vbCrLf
+                Err.Clear
+                GoTo SaltarArchivo
+            End If
+            
+            ' Verificar tablas comunes
+            tablas = Split("PRE_TASK,DUTY_PLANNED,DUTY_PLANNED_EXECUTED,DUTY", ",")
+            For i = 0 To UBound(tablas)
+                Set rs = conn.Execute("SELECT name FROM sqlite_master WHERE type='table' AND name='" & tablas(i) & "'")
+                If Not rs.EOF Then
+                    resultado = resultado & "   ✔ Contiene tabla: " & tablas(i) & vbCrLf
+                End If
+                rs.Close
+            Next
+            
+SaltarArchivo:
+            On Error GoTo 0
+            If Not conn Is Nothing Then conn.Close
         End If
     Next
     
-    If lista = "" Then
-        lista = "No se encontraron archivos .db en " & carpetaDB
-    End If
-    
-    MsgBox lista, vbInformation, "Bases de Datos ATHENA encontradas"
+    MsgBox resultado, vbInformation, "Contenido de Bases de Datos ATHENA"
 
 End Sub
